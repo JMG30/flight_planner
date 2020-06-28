@@ -1,0 +1,4 @@
+Focal length:  92
+Sensor size:  5.6
+Size along: 14140
+Size across: 15552
