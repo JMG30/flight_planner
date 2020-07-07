@@ -474,7 +474,7 @@ def photo_gsd_overlay(geom_footprint, crs_vect, crs_rst, raster, Xs, Ys, Zs,
         r = r + 1
         y_cell = y_cell - pxl_height
     #saving outputs to raster
-    temp_raster = QgsProcessingUtils.tempFolder() + '\\control.tif'
+    temp_raster = os.path.join(QgsProcessingUtils.tempFolder(), 'control.tif')
     driver = gdal.GetDriverByName('GTiff')
     dataset = driver.Create(temp_raster, xsize = len(row[col_min : col_max]),
                             ysize = len(rst_array[row_min : row_max]),
@@ -506,7 +506,7 @@ def minmaxheight(vector, raster):
     return h_min, h_max
 
 def save_error():
-    er_p = os.path.dirname(os.path.abspath(__file__))+'\Error_log.txt'
+    er_p = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'Error_log.txt')
     with open(er_p,'a') as er_file:
         er_file.write(time.ctime(time.time()) + '\n')
         er_file.write(traceback.format_exc() + '\n')
@@ -708,8 +708,8 @@ class Worker(QObject):
                     if step == 0 or progress_c % step == 0:
                         self.progress.emit(progress_c/float(ds_count)*100)
                 #saving outputs in temporary folder
-                tmp_overlay = QgsProcessingUtils.tempFolder() +'\\overlay.tif'
-                temp_gsd = QgsProcessingUtils.tempFolder() + '\\gsd.tif'
+                tmp_overlay = os.path.join(QgsProcessingUtils.tempFolder(), 'overlay.tif')
+                temp_gsd = os.path.join(QgsProcessingUtils.tempFolder(), 'gsd.tif')
                 driver = gdal.GetDriverByName('GTiff')
                 ds_overlay = driver.Create(tmp_overlay, xsize=cols_fp,
                                            ysize=rows_fp, bands=1,
@@ -987,8 +987,7 @@ class FlightPlannerDialog(QtWidgets.QDialog, FORM_CLASS):
         self.dtmMapLayCombB.setFilters(QgsMapLayerProxyModel.RasterLayer)
         self.aoiMapLayCombB.setFilters(QgsMapLayerProxyModel.PolygonLayer)
         self.corMapLayCombB.setFilters(QgsMapLayerProxyModel.LineLayer)
-        self.cam_lib_path = os.path.dirname(os.path.abspath(__file__))\
-                                + '\cameras_library\\'
+        self.cam_lib_path = os.path.join(os.path.dirname(os.path.abspath(__file__)),'cameras_library')
         self.cameras_list = os.listdir(self.cam_lib_path)
         self.combBcam.addItems(self.cameras_list)
         self.combBcam.setItemText (0, 'Select camera or type parameters')
@@ -1530,8 +1529,7 @@ class FlightPlannerDialog(QtWidgets.QDialog, FORM_CLASS):
     @pyqtSlot()
     def on_pBaddCamera_clicked(self):
         try:
-            cam_lib_path = os.path.dirname(os.path.abspath(__file__))\
-                                                + '\cameras_library\\'
+            cam_lib_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'cameras_library')
             name, ext = QFileDialog.getSaveFileName(self,'file',cam_lib_path,
                                                     'Text files (*.txt)')
             with open(name,'w') as new_camera:
@@ -1540,8 +1538,7 @@ class FlightPlannerDialog(QtWidgets.QDialog, FORM_CLASS):
                 new_camera.write('Size along: ' + self.lEalong.text()+'\n')
                 new_camera.write('Size across: ' + self.lEacross.text())
             self.combBcam.clear()
-            cam_lib_path = os.path.dirname(os.path.abspath(__file__))\
-                            + '\cameras_library\\'
+            cam_lib_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'cameras_library')
             cam_list = os.listdir(cam_lib_path)
             self.combBcam.addItems(cam_list)
         except:
@@ -1551,14 +1548,12 @@ class FlightPlannerDialog(QtWidgets.QDialog, FORM_CLASS):
     @pyqtSlot()
     def on_pBdelCamera_clicked(self):
         try:
-            cam_lib_path = os.path.dirname(os.path.abspath(__file__))\
-                                + '\cameras_library\\'
+            cam_lib_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'cameras_library')
             cam_name = self.combBcam.currentText()
-            if os.path.isfile(cam_lib_path + cam_name):
-                os.remove(cam_lib_path + cam_name)
+            if os.path.isfile(os.path.join(cam_lib_path, cam_name)):
+                os.remove(os.path.join(cam_lib_path, cam_name))
             self.combBcam.clear()
-            cam_lib_path = os.path.dirname(os.path.abspath(__file__))\
-                            + '\cameras_library\\'
+            cam_lib_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'cameras_library')
             cam_list = os.listdir(cam_lib_path)
             self.combBcam.addItems(cam_list)
         except:
