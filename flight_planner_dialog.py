@@ -1107,7 +1107,7 @@ class FlightPlannerDialog(QtWidgets.QDialog, FORM_CLASS):
     def on_combBcam_activated(self, camera_name):
         if isinstance(camera_name, str):
             dict = {}
-            with open(self.cam_lib_path + str(camera_name)) as camera:
+            with open(os.path.join(self.cam_lib_path, str(camera_name))) as camera:
                 for line in camera:
                     (key, val) = line.split(':')
                     dict[key] = val
