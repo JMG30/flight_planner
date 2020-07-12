@@ -4,7 +4,7 @@ QGIS plugin for planning photogrammetric flights.
 Plugin consists of two parts:
 1. designing of photogrammetric flight plan. User needs to provide:
    - camera parameters (focal length, sensor pixel size, number of pixels along/across track),
-   - desireable GSD,
+   - desirable GSD,
    - maximum and minimum terrain heights in the Area of Interest,
    - two margins of exceeding photos outside the AoI.
    
