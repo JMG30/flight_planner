@@ -13,11 +13,12 @@ methods of flight altitude planning (except to the basic method 'one common alti
 the entire project'):
    - altitude for each strip,
    - terrain following.
-For corridor type flight plan user needs *.shp layer showing axes of flight
+   For corridor type flight plan user needs *.shp layer showing axes of flight
 and sets buffer size. For block type flight plan user needs *.shp layer presenting Area of Interest
 and sets flight direction. The results are 2 layers: projection centers of photos
 (with attribute table containing External Orientation parameters)
 and photos size at mean terrain height.
+
 
 2. assessing of the flight (project or already done)
 in the form of output:
