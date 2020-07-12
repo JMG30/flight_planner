@@ -2,13 +2,13 @@
 QGIS plugin for planning photogrammetric flights.
 
 Plugin consists of two parts:
-1. designing of photogrammetric flight plan. User needs to provide:
+1. design of photogrammetric flight plan. User needs to provide:
    - camera parameters (focal length, sensor pixel size, number of pixels along/across track),
    - desirable GSD,
    - maximum and minimum terrain heights in the Area of Interest,
    - two margins of exceeding photos outside the AoI.
    
-   If the user loads the DTM in raster format, the plugin allows to choose from two additional
+   If user loads the DTM, the plugin allows to choose from two additional
 methods of flight altitude planning (except to the basic method 'one common altitude for
 the entire project'):
    - altitude for each strip,
@@ -21,11 +21,11 @@ and sets flight direction. The results are 2 layers: projection centers of photo
 and photos size at mean terrain height.
 
 
-2. assessing of the flight (project or already done)
+2. assessment of the flight (project or already done)
 in the form of output:
-   - vector layer showing real photos coverage (footprint),
+   - vector layer of real photos coverage (footprint),
    - raster layer of the logical sum of overlapping photos,
    - raster layer of ground sampling distance (GSD).
 To conduct assessment user needs to providing projection centers layer
 (with External Orientation parameters), camera parameters
-and DTM in raster format.
+and DTM.
