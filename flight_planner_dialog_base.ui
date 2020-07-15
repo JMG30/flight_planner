@@ -1200,9 +1200,25 @@ overlapping images</string>
     <string>&lt;html&gt;&lt;head/&gt;&lt;body&gt;&lt;p&gt;&lt;span style=&quot; font-size:9pt; font-weight:600;&quot;&gt;Flight control&lt;/span&gt;&lt;/p&gt;&lt;/body&gt;&lt;/html&gt;</string>
    </property>
   </widget>
+  <widget class="QLabel" name="labelGuide">
+   <property name="geometry">
+    <rect>
+     <x>170</x>
+     <y>35</y>
+     <width>35</width>
+     <height>20</height>
+    </rect>
+   </property>
+   <property name="text">
+    <string>&lt;html&gt;&lt;head/&gt;&lt;body&gt;&lt;p&gt;&lt;a href=&quot;https://github.com/JMG30/flight_planner/wiki/Guide&quot;&gt;&lt;span style=&quot; text-decoration: underline; color:#0000ff;&quot;&gt;Guide&lt;/span&gt;&lt;/a&gt;&lt;/p&gt;&lt;/body&gt;&lt;/html&gt;</string>
+   </property>
+   <property name="openExternalLinks">
+    <bool>true</bool>
+   </property>
+  </widget>
+  <zorder>tabWidget</zorder>
   <zorder>frame</zorder>
   <zorder>frame_2</zorder>
-  <zorder>tabWidget</zorder>
   <zorder>lEfocal</zorder>
   <zorder>label</zorder>
   <zorder>pBaccept</zorder>
@@ -1233,6 +1249,7 @@ overlapping images</string>
   <zorder>pBcancel</zorder>
   <zorder>label_12</zorder>
   <zorder>label_27</zorder>
+  <zorder>labelGuide</zorder>
  </widget>
  <customwidgets>
   <customwidget>
