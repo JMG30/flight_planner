@@ -1176,18 +1176,18 @@ class FlightPlannerDialog(QtWidgets.QDialog, FORM_CLASS):
         
     def on_cBincreaseOverlap_stateChanged(self):
         try:
-            focal = float(self.lEfocal.text())
-            gsd = float(self.lEgsd.text())
-            sensor = float(self.lEsensor.text())
-            max_h = float(self.lEmaxH.text())
-            min_h = float(self.lEminH.text())
-            p0 = float(self.lEp.text())
-            q0 = float(self.lEq.text())
+            focal = float(self.lEfocal.text().replace(',','.'))
+            gsd = float(self.lEgsd.text().replace(',','.'))
+            sensor = float(self.lEsensor.text().replace(',','.'))
+            max_h = float(self.lEmaxH.text().replace(',','.'))
+            min_h = float(self.lEminH.text().replace(',','.'))
+            p0 = float(self.lEp.text().replace(',','.'))
+            q0 = float(self.lEq.text().replace(',','.'))
             W = ((gsd*10)/(sensor/1000)*focal)/1000
             if self.cBincreaseOverlap.isChecked():
                 #remembering old values of overlap p, sidelap q
-                self.p0_prev = float(self.lEp.text())
-                self.q0_prev = float(self.lEq.text())
+                self.p0_prev = float(self.lEp.text().replace(',','.'))
+                self.q0_prev = float(self.lEq.text().replace(',','.'))
                 #new values of overlap p, sidelap q
                 self.p = p0/100 + 0.5*((max_h - min_h)/2)/W
                 self.q = q0/100 + 0.7*((max_h - min_h)/2)/W
@@ -1332,15 +1332,15 @@ class FlightPlannerDialog(QtWidgets.QDialog, FORM_CLASS):
     @pyqtSlot()
     def on_pBaccept_clicked(self):
         try:
-            focal = float(self.lEfocal.text())
-            gsd = float(self.lEgsd.text())
-            sensor = float(self.lEsensor.text())
+            focal = float(self.lEfocal.text().replace(',','.'))
+            gsd = float(self.lEgsd.text().replace(',','.'))
+            sensor = float(self.lEsensor.text().replace(',','.'))
             along = int(self.lEalong.text())
             across = int(self.lEacross.text())
-            max_h = float(self.lEmaxH.text())
-            min_h = float(self.lEminH.text())
-            p0 = float(self.lEp.text())
-            q0 = float(self.lEq.text())
+            max_h = float(self.lEmaxH.text().replace(',','.'))
+            min_h = float(self.lEminH.text().replace(',','.'))
+            p0 = float(self.lEp.text().replace(',','.'))
+            q0 = float(self.lEq.text().replace(',','.'))
             mult_base = self.sBmultipleBase.value()
             x_percent = self.sBexceedingExtremeStrips.value()
             #flight height above mean reference terrain height
@@ -1500,8 +1500,8 @@ class FlightPlannerDialog(QtWidgets.QDialog, FORM_CLASS):
             o_field = self.omegaFieldComboBox.currentField()
             p_field = self.phiFieldComboBox.currentField()
             k_field = self.kappaFieldComboBox.currentField()
-            focal = float(self.lEfocal.text())/1000 #[m]
-            size_sensor = float(self.lEsensor.text())/1000000 #[m]
+            focal = float(self.lEfocal.text().replace(',','.'))/1000 #[m]
+            size_sensor = float(self.lEsensor.text().replace(',','.'))/1000000 #[m]
             size_along = int(self.lEalong.text())
             size_across = int(self.lEacross.text())
             threshold = self.dSpinBoxThreshold.value()
