@@ -29,3 +29,7 @@ in the form of output:
 To conduct assessment user needs to providing projection centers layer
 (with External Orientation parameters), camera parameters
 and DTM.
+
+[Installation](https://github.com/JMG30/flight_planner/wiki/Installation)
+
+[More detailed Guide](https://github.com/JMG30/flight_planner/wiki/Guide)
