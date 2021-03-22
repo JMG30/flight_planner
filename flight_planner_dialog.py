@@ -21,950 +21,36 @@
  *                                                                         *
  ***************************************************************************/
 """
-import numpy as np
 import os
-import processing
-import scipy.ndimage as ndimage
-import traceback
-import time
-from osgeo import gdal, osr
-from math import sqrt, ceil, fabs, radians, pi, tan, atan2, acos, cos, sin
-from qgis.core import *
-from qgis.PyQt import uic, QtWidgets
-from PyQt5.QtGui import QColor
-from PyQt5.QtWidgets import QFileDialog, QMessageBox
-from PyQt5.QtCore import pyqtSlot, pyqtSignal, QVariant, QObject, QThread
+from math import sqrt, ceil, fabs, pi, atan2, atan
 
-# This loads your .ui file so that PyQt can populate your plugin
+import processing
+from osgeo import gdal
+from pyproj import Transformer
+from PyQt5.QtWidgets import QFileDialog, QMessageBox
+from PyQt5.QtCore import pyqtSlot, QVariant, QThread
+from qgis.PyQt import uic, QtWidgets
+from qgis.core import (
+    QgsCoordinateReferenceSystem,
+    QgsField,
+    QgsFieldProxyModel,
+    QgsMapLayerProxyModel,
+    QgsProject
+)
+
+from .worker import Worker
+from .functions import (
+    bounding_box_at_angle,
+    projection_centres, line,
+    transf_coord,
+    minmaxheight,
+    save_error
+)
+
+# Load .ui file so that PyQt can populate plugin
 # with the elements from Qt Designer
 FORM_CLASS, _ = uic.loadUiType(os.path.join(
     os.path.dirname(__file__), 'flight_planner_dialog_base.ui'))
-
-
-def ground_edge_points(R, XY_list, XY_list_prev, Z_list, threshold,
-                        list_xy, Xs, Ys, Zs, ds, f, crs_DTM, crs_pc):
-    #coefficients of rotation matrix R
-    a1, a2, a3 = R[0][0], R[0][1], R[0][2]
-    b1, b2, b3 = R[1][0], R[1][1], R[1][2]
-    c1, c2, c3 = R[2][0], R[2][1], R[2][2]
-    Z_DTM = ds.GetRasterBand(1).ReadAsArray()
-    counter = 0
-    #interpolating X, Y until given threshold will be reached
-    while check_threshold(XY_list, XY_list_prev, threshold) == False:
-        XY_list_prev = XY_list
-        XY_list = []
-        rc_list = []
-        i = 0
-        for Z in Z_list:
-            x, y = list_xy[i][0],list_xy[i][1]
-            X = Xs + (Z-Zs) * ((a1*x+a2*y-a3*f) / (c1*x+c2*y-c3*f))
-            Y = Ys + (Z-Zs) * ((b1*x+b2*y-b3*f) / (c1*x+c2*y-c3*f))
-            XY_list.append([X,Y])
-            #transformation if CRS of DTM and Projection Centers are different
-            if crs_DTM != crs_pc:
-                X_DTM, Y_DTM = transf_coord(crs_pc, crs_DTM, X, Y)
-                #transformation pixel coordinates
-                c, r = crs2pixel(ds.GetGeoTransform(), X_DTM, Y_DTM)
-            else:
-                c, r = crs2pixel(ds.GetGeoTransform(), X, Y)
-            rc_list.append([r,c])
-            i += 1
-        coords = np.array(rc_list).T
-        #interpolating heights at coordinates X, Y
-        Z_list = ndimage.map_coordinates(Z_DTM, coords, output = np.float)
-        #protection against too long iteration
-        if counter > 100:
-            break
-        counter += 1
-    return XY_list
-
-def image_edge_points(size_sensor, size_across, size_along,
-                      Z, Zs, f, mean_res):
-    #ground size Lx, Ly of the photo
-    W = Zs - Z
-    Ly = size_across*size_sensor*W/f
-    Lx = size_along*size_sensor*W/f
-    #number of points along the edges of the photo
-    num_y = Ly / mean_res
-    num_x = Lx / mean_res
-    list_x12y = []
-    list_x34y = []
-    x12 = - size_sensor * size_along/2
-    x34 = size_sensor * size_along/2
-    #points along flight direction
-    for i in np.linspace(int(-size_across/2), int(size_across/2), int(num_y),
-    endpoint=True):
-        y = size_sensor * i
-        list_x12y.append([x12, y])
-        list_x34y.append([x34, y])
-    list_x12y.reverse()
-    list_xy41 = []
-    list_xy23 = []  
-    y41 = size_sensor * size_across/2
-    y23 = -size_sensor * size_across/2
-    #points across flight direction
-    for i in np.linspace(int(-size_along/2), int(size_along/2), int(num_x),
-    endpoint=True):
-        x = size_sensor * i
-        list_xy41.append([x, y41])
-        list_xy23.append([x, y23])
-    list_xy41.reverse()
-    list_xy = list_x12y + list_xy23 + list_x34y + list_xy41
-    Z_list = [Z]*int(num_x)*2 + [Z]*int(num_y)*2
-    XY_list = [[0,0]]*int(num_x)*2 + [[0,0]]*int(num_y)*2
-    XY_list_start = [[1000,1000]]*int(num_x)*2 + [[1000,1000]]*int(num_y)*2
-    return list_xy, Z_list, XY_list, XY_list_start
-
-def check_threshold(list_a, list_b, threshold):
-    c = 0
-    dist_list = []
-    for xy in list_a:
-        d = sqrt((list_a[c][0]-list_b[c][0])**2\
-        + (list_a[c][1]-list_b[c][1])**2)
-        dist_list.append(round(d,3))
-        c = c+1
-    return all(elem < threshold for elem in dist_list)
-
-def angle_between_vectors(v1, v2):
-    #multiplication of vectors
-    v1v2 = np.dot(v1,v2)
-    lenv1 = np.linalg.norm(v1)
-    lenv2 = np.linalg.norm(v2)
-    if lenv1 == 0:
-        lenv1 = 0.000000000000000001
-    if lenv2 == 0:
-        lenv2 = 0.000000000000000001
-    #cosine of angle g between vectors
-    if v1v2/(lenv1*lenv2) <= 1 and v1v2/(lenv1*lenv2) >= -1:
-        g = v1v2 / (lenv1*lenv2)
-    elif v1v2/(lenv1*lenv2) > 1:
-        g = 1
-    elif v1v2/(lenv1*lenv2) < -1:
-        g = -1
-    angle = acos(g)*180/pi
-    return angle
-
-def bounding_box_at_angle(alpha, geometry):
-    #exception due to tan(90) and tan(270) is equal infinity
-    if alpha != 90 and alpha != 270:
-        #variable_ll means parallel, variable_l_ means perpendicular
-        a_ll = tan(alpha*pi/180)
-        #exception for division by zero
-        if a_ll != 0:
-            a_l_ = -1/a_ll
-        else:
-            a_l_ = -1/0.000000000000000001
-        x_centr = geometry.centroid().asPoint().x()
-        y_centr = geometry.centroid().asPoint().y()
-        b_ll = y_centr - a_ll * x_centr
-        b_l_ = y_centr - a_l_ * x_centr
-        A_ll = a_ll
-        B_ll = -1
-        C_ll = b_ll
-        A_l_ = a_l_
-        B_l_ = -1
-        C_l_ = b_l_
-        vrtx_dist_ll = []
-        vrtx_dist_l_ = []
-        #computing distances from centroid lines to every vertex of geometry
-        for vertex in range(len(geometry.convertToType(1).asPolyline())):
-            vX = geometry.vertexAt(vertex).x()
-            vY = geometry.vertexAt(vertex).y()
-            d_ll = (A_ll*vX + B_ll*vY + C_ll) / sqrt(A_ll**2 + B_ll**2)
-            vrtx_dist_ll.append(d_ll)
-            d_l_ = (A_l_*vX + B_l_*vY + C_l_) / sqrt(A_l_**2 + B_l_**2)
-            vrtx_dist_l_.append(d_l_)  
-        #index of vertices with max and min distance from centroid lines
-        i1_ll = vrtx_dist_ll.index(max(vrtx_dist_ll))
-        i2_ll = vrtx_dist_ll.index(min(vrtx_dist_ll))
-        i1_l_ = vrtx_dist_l_.index(max(vrtx_dist_l_))
-        i2_l_ = vrtx_dist_l_.index(min(vrtx_dist_l_))
-        #calculating factor b of equation y = ax + b
-        b1_ll = geometry.vertexAt(i1_ll).y()-a_ll*geometry.vertexAt(i1_ll).x()
-        b2_ll = geometry.vertexAt(i2_ll).y()-a_ll*geometry.vertexAt(i2_ll).x()
-        b1_l_ = geometry.vertexAt(i1_l_).y()-a_l_*geometry.vertexAt(i1_l_).x()
-        b2_l_ = geometry.vertexAt(i2_l_).y()-a_l_*geometry.vertexAt(i2_l_).x()
-        #calculating dimensions of bounding box
-        Dy = fabs(b1_ll - b2_ll) / sqrt(A_ll**2 + B_ll**2)
-        Dx = fabs(b1_l_ - b2_l_) / sqrt(A_l_**2 + B_l_**2)
-        if alpha > 90 and alpha < 270:
-            b_ll = min(b1_ll, b2_ll)
-        else:
-            b_ll = max(b1_ll, b2_ll)
-        if alpha >= 0 and alpha <= 180:
-            b_l_ = min(b1_l_, b2_l_)
-        else:
-            b_l_ = max(b1_l_, b2_l_)
-    else:
-        x_max = geometry.boundingBox().xMaximum()
-        x_min = geometry.boundingBox().xMinimum()
-        y_max = geometry.boundingBox().yMaximum()
-        y_min = geometry.boundingBox().yMinimum()
-        #calculating dimension of bounding box
-        Dx = y_max - y_min
-        Dy = x_max - x_min
-        if alpha == 270:
-            a_ll, b_ll = line(y_max, y_min, x_max, x_max)
-            a_l_, b_l_ = line(y_max, y_max, x_min, x_max)
-        else:
-            a_ll, b_ll = line(y_max, y_min, x_min, x_min)
-            a_l_, b_l_ = line(y_min, y_min, x_min, x_max)    
-    return a_ll, b_ll, a_l_, b_l_, Dx, Dy
-
-def projection_centres(alpha, geometry, crs_vect, a_ll, b_ll, a_l_, b_l_,
-                       Dx, Dy , Bx, By, Lx, Ly, x, m, H, strip_nr, photo_nr):
-    #optimization of strips
-    Dy_o = Dy - 2*(0.5 - x/100)*Ly
-    #2 exceptions if dimension Dy is too thin (e.g. corridors)
-    if Dy_o < 0:
-        Dy_o = 0
-    Ny = ceil(Dy_o/By)+1
-    if Ny != 1:
-        By_o = Dy_o/(Ny-1)
-    else:
-        By_o = 0
-    #number of photos in strip
-    Nx = ceil(Dx/Bx) + 2*m + 1
-    #line moved away from line of bounding box, parallel to flight direction
-    A = a_ll
-    B = -1
-    C1 = b_ll
-    if alpha > 90 and alpha <= 270:
-        C2 = C1 + (0.5 - x/100)*Ly*sqrt(A**2 + B**2)
-        if Ny == 1:
-            C2 = C1 + Dy/2*sqrt(A**2 + B**2)
-    else:
-        C2 = C1 - (0.5 - x/100)*Ly*sqrt(A**2 + B**2)
-        if Ny == 1:
-            C2 = C1 - Dy/2*sqrt(A**2 + B**2)
-    a1 = a_ll
-    b1 = C2
-    #centering projection centers relative to the bounding box
-    D = ((ceil(Dx/Bx))*Bx - Dx)/2
-    A2 = a_l_
-    B2 = -1
-    C12 = b_l_
-    if alpha >= 0 and alpha <= 180:
-        C22 = C12 - D*sqrt(A2**2 + B2**2)
-    else:
-        C22 = C12 + D*sqrt(A2**2 + B2**2)
-    a2 = a_l_
-    b2 = C22
-    #coordinates of the center projection of reference 
-    x0 = (b1 - b2)/(a2 - a1)
-    y0 = (b1*a2 - b2*a1)/(a2 - a1)
-    #increments between pictures in strips
-    dx = cos(radians(alpha))*Bx
-    dy = sin(radians(alpha))*Bx
-    #increments for subsequent strips 
-    dx0 = cos(radians(alpha) - pi/2)*By_o
-    dy0 = sin(radians(alpha) - pi/2)*By_o
-    #creating layer of projection centres and its attribute table
-    pc_layer = QgsVectorLayer("Point?crs=" + str(crs_vect),
-                                      "projection centres", "memory")
-    pr = pc_layer.dataProvider()
-    pr.addAttributes([QgsField("Strip",QVariant.String),
-                      QgsField("Photo Number", QVariant.String),
-                      QgsField("X [m]",QVariant.Double),
-                      QgsField("Y [m]", QVariant.Double),
-                      QgsField("Alt. ASL [m]", QVariant.Double),
-                      QgsField("Omega [deg]", QVariant.Double),
-                      QgsField("Phi [deg]", QVariant.Double),
-                      QgsField("Kappa [deg]", QVariant.Double)])
-    pc_layer.updateFields()    
-    #creating layer of range photos
-    photo_layer = QgsVectorLayer("Polygon?crs=" + str(crs_vect),
-                                 "photos", "memory")
-    prov_photos = photo_layer.dataProvider()
-    prov_photos.addAttributes([QgsField("Strip",QVariant.String),
-                           QgsField("Photo Number", QVariant.String)])
-    photo_layer.updateFields() 
-    if alpha >= 0 and alpha <= 180:
-        kappa = alpha
-    else:
-        kappa = alpha - 360
-    d = sqrt((Lx/2)**2 + (Ly/2)**2)
-    theta = fabs( atan2(Ly/2, Lx/2))
-    #calculation of projection centers and ranges of photos
-    for k in range(Ny):
-        n_prev = -m - 1
-        #coordinates of strip range
-        xs1 = x0 + (-m)*dx + cos(radians(alpha) + theta - pi)*d
-        ys1 = y0 + (-m)*dy + sin(radians(alpha) + theta - pi)*d
-        xs2 = x0 + (-m)*dx + cos(radians(alpha) - theta + pi)*d
-        ys2 = y0 + (-m)*dy + sin(radians(alpha) - theta + pi)*d
-        xe3 = x0 + (Nx-m-1)*dx + cos(radians(alpha) + theta)*d
-        ye3 = y0 + (Nx-m-1)*dy + sin(radians(alpha) + theta)*d
-        xe4 = x0 + (Nx-m-1)*dx + cos(radians(alpha) - theta)*d
-        ye4 = y0 + (Nx-m-1)*dy + sin(radians(alpha) - theta)*d
-        strip_pnts = [QgsPointXY(xs1, ys1), QgsPointXY(xs2, ys2),
-                       QgsPointXY(xe3, ye3), QgsPointXY(xe4, ye4)]
-        geom_strip = QgsGeometry.fromPolygonXY([strip_pnts])
-        common_part = geom_strip.intersection(geometry)
-        for n in range(-m, Nx-m):
-            xi = x0 + n*dx
-            yi = y0 + n*dy
-            #coordinates of photo range
-            x1 = xi + cos(radians(alpha) + theta - pi)*d
-            y1 = yi + sin(radians(alpha) + theta - pi)*d
-            x2 = xi + cos(radians(alpha) - theta + pi)*d
-            y2 = yi + sin(radians(alpha) - theta + pi)*d
-            x3 = xi + cos(radians(alpha) + theta)*d
-            y3 = yi + sin(radians(alpha) + theta)*d
-            x4 = xi + cos(radians(alpha) - theta)*d
-            y4 = yi + sin(radians(alpha) - theta)*d
-            feat_poly = QgsFeature()
-            pnts = [QgsPointXY(x1, y1), QgsPointXY(x2, y2),
-                    QgsPointXY(x3, y3), QgsPointXY(x4, y4)]
-            geom_poly = QgsGeometry.fromPolygonXY([pnts])
-            xp = xi + cos(radians(alpha) + pi/2)*Ly/2
-            yp = yi + sin(radians(alpha) + pi/2)*Ly/2
-            xk = xi + cos(radians(alpha) - pi/2)*Ly/2
-            yk = yi + sin(radians(alpha) - pi/2)*Ly/2
-            central_line = QgsGeometry.fromPolylineXY([QgsPointXY(xp, yp),
-                                                       QgsPointXY(xk, yk)])
-            #checking if projection centre can be skipped
-            if central_line.distance(common_part) <= m*Bx:
-                photo_nr += 1
-                if fabs(n - n_prev) != 1:
-                    strip_nr += 1
-                s_nr = '%(s_nr)04d'% {'s_nr': strip_nr}
-                p_nr = '%(p_nr)05d'% {'p_nr': photo_nr}
-                n_prev = n                
-                feat_pnt = QgsFeature()
-                pnt = QgsPointXY(xi, yi)
-                feat_pnt.setGeometry(QgsGeometry.fromPointXY(pnt))
-                feat_pnt.setAttributes([s_nr, p_nr, round(xi, 2),round(yi, 2),
-                                       round(H, 2), 0, 0, kappa])
-                pr.addFeature(feat_pnt)
-                pc_layer.updateExtents()                
-                feat_poly.setGeometry(geom_poly)
-                feat_poly.setAttributes([s_nr, p_nr])
-                prov_photos.addFeature(feat_poly)
-                photo_layer.updateExtents()
-        x0 = x0 + dx0
-        y0 = y0 + dy0
-    return pc_layer, photo_layer, strip_nr, photo_nr
-
-def crs2pixel(geo, x, y):
-    upx = geo[0] #top left x
-    upy = geo[3] #top left y
-    resx = geo[1] #W-E pixel resolution
-    resy = geo[5] #N-S pixel resolution
-    skewx = geo[2]
-    skewy = geo[4]
-    pc = sqrt(skewx**2+resx**2)
-    pr = sqrt(skewy**2+resy**2)
-    alpha = acos(resx/pc)
-    column = (cos(alpha)*(x - upx) + sin(alpha)*(y - upy)) / fabs(pc)
-    row = (cos(alpha)*(upy - y) + sin(alpha)*(x - upx)) / fabs(pr)
-    return (column, row)
-
-def line(ya, yb, xa, xb):
-    dy = ya - yb
-    dx = xa - xb
-    if dx != 0:
-        a = dy/dx
-        b = ya - (dy/dx)*xa
-    else:
-        a = dy/0.000000000000000001
-        b = ya - (dy/0.000000000000000001)*xa
-    return a, b
-
-def lines_intersection(a1, b1, a2, b2):
-    x = (b2 - b1)/(a1 - a2)
-    y = (b1*a2 - b2*a1)/(a2-a1)
-    return x, y
-
-def rotation_matrix(omega, phi, kappa):
-    phi = radians(phi)
-    omega = radians(omega)
-    kappa = radians(kappa)    
-    R = np.array([
-        [cos(phi)*cos(kappa), -cos(phi)*sin(kappa), sin(phi)],
-        [sin(omega)*sin(phi)*cos(kappa) + cos(omega)*sin(kappa),
-        -sin(omega)*sin(phi)*sin(kappa) + cos(omega)*cos(kappa),
-        -sin(omega)*cos(phi)],
-        [-cos(omega)*sin(phi)*cos(kappa) + sin(omega)*sin(kappa),
-        cos(omega)*sin(phi)*sin(kappa) + sin(omega)*cos(kappa),
-        cos(omega)*cos(phi)]
-        ])   
-    return R
-
-def transf_coord(source_CRS, destination_CRS, x, y):
-    crs_src = QgsCoordinateReferenceSystem(source_CRS)
-    crs_dest = QgsCoordinateReferenceSystem(destination_CRS)
-    ct = QgsCoordinateTransform(crs_src, crs_dest, QgsProject.instance())
-    x_transformed, y_transformed = ct.transform(x, y)
-    return x_transformed, y_transformed    
-
-def photo_gsd_overlay(geom_footprint, crs_vect, crs_rst, raster, Xs, Ys, Zs,
-                      Xs_, Ys_, Zs_, f, size_sensor):
-    bound_box = geom_footprint.boundingBox()
-    if crs_vect != crs_rst:
-        x_min_bb, y_max_bb = transf_coord(crs_vect, crs_rst,
-                                          bound_box.xMinimum(),
-                                          bound_box.yMaximum())
-        x_max_bb, y_min_bb = transf_coord(crs_vect, crs_rst,
-                                          bound_box.xMaximum(),
-                                          bound_box.yMinimum())
-    else:
-        x_min_bb, y_max_bb = bound_box.xMinimum(), bound_box.yMaximum()
-        x_max_bb, y_min_bb = bound_box.xMaximum(), bound_box.yMinimum()
-    geo_rst = raster.GetGeoTransform()
-    pxl_width = geo_rst[1]
-    pxl_height = -geo_rst[5]
-    uplx = geo_rst[0]
-    uply = geo_rst[3]
-    #transformation to pixel coordinates
-    col_min, row_min = crs2pixel(geo_rst, x_min_bb, y_max_bb)
-    col_max, row_max = crs2pixel(geo_rst, x_max_bb, y_min_bb)
-    col_min, row_min = int(col_min), int(row_min)
-    col_max, row_max = int(col_max), int(row_max)
-    #output array for logical sum of overlaying photos
-    overlap_array = np.zeros((row_max - row_min, col_max - col_min))
-    gsd_array = np.ones((row_max - row_min, col_max - col_min))*1000
-    vect_vertical = [0, 0, -1]
-    vect_camera_axis = [Xs_-Xs, Ys_-Ys, Zs_-Zs]
-    #tilt angle of photo
-    t = angle_between_vectors(vect_vertical, vect_camera_axis)
-    band = raster.GetRasterBand(1)
-    rst_array = band.ReadAsArray()
-    #Get nodata value from the GDAL band object
-    nodata = band.GetNoDataValue()
-    #Create a masked array for making calculations without nodata values
-    rst_array = np.ma.masked_equal(rst_array, nodata)
-    r = 0
-    y_cell = uply - row_min*pxl_height - pxl_height/2
-    for row in rst_array[row_min : row_max]:
-        c = 0
-        x_cell = uplx + col_min*pxl_width + pxl_width/2
-        for Z in row[col_min : col_max]:
-            px, py = transf_coord(crs_rst, crs_vect, x_cell, y_cell)
-            p = QgsGeometry.fromPointXY(QgsPointXY(px, py))
-            if geom_footprint.contains(p):
-                overlap_array[r, c] = 1
-                if t == 0:
-                    gsd_array[r, c] = ((Zs - Z)*size_sensor/f)*100
-                else:
-                    #photo's greatest fall line
-                    a, b = line(Ys, Ys_, Xs, Xs_)
-                    #line perpendicular to photo's greatest fall line
-                    if a != 0:
-                        a_l_ = -1/a
-                    else:
-                        a_l_ = -1/0.000000000000000001
-                    b_l_ = py - a_l_*px
-                    #projection point on photo's greatest fall line
-                    ppx, ppy = lines_intersection(a_l_, b_l_, a, b)
-                    #vector projection center - projection point
-                    vect_S_pp = [ppx - Xs, ppy - Ys, Z - Zs]
-                    beta = angle_between_vectors(vect_vertical, vect_S_pp)
-                    direction = angle_between_vectors((vect_camera_axis[0],
-                                                        vect_camera_axis[1]),
-                                                        (vect_S_pp[0],
-                                                        vect_S_pp[1]))
-                    if direction >= 90:
-                        beta = -beta
-                    W = Zs - Z
-                    gsd_array[r, c] = size_sensor*(W/f)*cos(radians(beta-t))\
-                        /cos(radians(beta))*100
-            c = c + 1
-            x_cell = x_cell + pxl_width
-        r = r + 1
-        y_cell = y_cell - pxl_height
-    #saving outputs to raster
-    temp_raster = os.path.join(QgsProcessingUtils.tempFolder(), 'control.tif')
-    driver = gdal.GetDriverByName('GTiff')
-    dataset = driver.Create(temp_raster, xsize = len(row[col_min : col_max]),
-                            ysize = len(rst_array[row_min : row_max]),
-                            bands = 2, eType=gdal.GDT_Float32)
-    dataset.GetRasterBand(1).WriteArray(overlap_array)
-    dataset.GetRasterBand(2).WriteArray(gsd_array)
-    #setting georeference
-    geot = [uplx + col_min*pxl_width, geo_rst[1], geo_rst[2],
-            uply - row_min*pxl_height, geo_rst[4], geo_rst[5]]
-    dataset.SetGeoTransform(geot)
-    srs = osr.SpatialReference()
-    srs.SetWellKnownGeogCS(crs_rst)
-    dataset.SetProjection(srs.ExportToWkt())
-    return dataset
-
-def minmaxheight(vector, raster):
-    #clipping DTM with vector layer (e.g. AoI, strip, photo)
-    clippedDTM = processing.run("gdal:cliprasterbymasklayer",\
-    {'INPUT':raster,'MASK':vector,'SOURCE_CRS':None,'TARGET_CRS':None,\
-    'NODATA':None,'ALPHA_BAND':False,'CROP_TO_CUTLINE':True,\
-    'KEEP_RESOLUTION':False,'SET_RESOLUTION':False,'X_RESOLUTION':None,\
-    'Y_RESOLUTION':None,'MULTITHREADING':False,'OPTIONS':'','DATA_TYPE':0,\
-    'OUTPUT':'TEMPORARY_OUTPUT'})
-    clipped_DTM_rast_lay = QgsRasterLayer(clippedDTM['OUTPUT'], "DEM")
-    stats = clipped_DTM_rast_lay.dataProvider().bandStatistics(1,\
-    QgsRasterBandStats.All)
-    h_min = stats.minimumValue
-    h_max = stats.maximumValue   
-    return h_min, h_max
-
-def save_error():
-    er_p = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'Error_log.txt')
-    with open(er_p,'a') as er_file:
-        er_file.write(time.ctime(time.time()) + '\n')
-        er_file.write(traceback.format_exc() + '\n')
-
-
-class Worker(QObject):
-    finished = pyqtSignal(object)
-    error = pyqtSignal(Exception, basestring)
-    progress = pyqtSignal(float)
-    enabled = pyqtSignal(bool)
-    
-    def __init__(self, **data):
-        QObject.__init__(self)
-        self.layer = data['pointLayer']
-        self.crs_vct = data['crsVectorLayer']
-        self.DTM = data['DTM']
-        if 'polygonLayer' in data:
-            self.layer_pol = data['polygonLayer']
-        if 'crsRasterLayer' in data:
-            self.crs_rst = data['crsRasterLayer']
-        if 'hField' in data:
-            self.height_f = data['hField']
-        if 'omegaField' in data:
-            self.omega_f = data['omegaField']
-        if 'phiField' in data:
-            self.phi_f = data['phiField']
-        if 'kappaField' in data:
-            self.kappa_f = data['kappaField']
-        if 'focal' in data:
-            self.f = data['focal']
-        if 'size_sensor' in data:
-            self.size_sensor = data['size_sensor']
-        if 'size_along' in data:
-            self.size_along = data['size_along']
-        if 'size_across' in data:
-            self.size_across = data['size_across']
-        if 'overlap' in data:
-            self.overlap_bool = data['overlap']
-        if 'gsd' in data:
-            self.gsd_bool = data['gsd']
-        if 'footprint' in data:
-            self.footprint_bool = data['footprint']
-        if 'threshold' in data:
-            self.threshold = data['threshold']
-        if 'theta' in data:
-            self.theta = data['theta']
-        if 'distance' in data:
-            self.dist = data['distance']
-        if 'height' in data:
-            self.w = data['height']
-        if 'strips' in data:
-            self.s = data['strips']
-        if 'tabWidg' in data:
-            self.tab_widg_cor = data['tabWidg']
-        if 'LineRangeList' in data:    
-            self.g_line_list = data['LineRangeList']
-        if 'Range' in data:    
-            self.geom_aoi = data['Range']
-        self.killed = False
-
-    def run_control(self):
-        result = []
-        try:
-            Z_srtm = self.DTM.GetRasterBand(1).ReadAsArray()
-            uplx_r, xres_r, xskew_r,\
-            uply_r, yskew_r, yres_r = self.DTM.GetGeoTransform()
-            #calculating metric resolution if crs is geographic
-            if QgsCoordinateReferenceSystem(self.crs_rst).isGeographic():
-                uplx_r_n = uplx_r + xres_r
-                uply_r_n = uply_r + yres_r
-                uplx_v, uply_v = transf_coord(self.crs_rst, self.crs_vct,
-                                              uplx_r, uply_r)
-                uplx_v_n, uply_v_n = transf_coord(self.crs_rst, self.crs_vct,
-                                                  uplx_r_n, uply_r_n)
-                xres_rst = fabs(uplx_v_n - uplx_v)
-                yres_rst = fabs(uply_v_n - uply_v)
-            mean_res = (fabs(xres_rst) + fabs(yres_rst))/2
-            #output footprint layer
-            footprint_lay = QgsVectorLayer("Polygon?crs="+str(self.crs_vct),
-                                            "footprint", "memory")
-            provider = footprint_lay.dataProvider()
-            features = self.layer.getFeatures()
-            feat_footprint = QgsFeature()
-            ds_list = []
-            ulx_list = []
-            uly_list = []
-            lrx_list = []
-            lry_list = []        
-            feat_count = self.layer.featureCount()
-            progress_c = 0
-            step = feat_count // 1000
-            #creating footprint, overlapping, GSD maps
-            for feature in features:
-                if self.killed is True:
-                    # kill request received, exit loop early
-                    break    
-                geom_pc = feature.geometry()
-                Xs = geom_pc.asPoint().x()
-                Ys = geom_pc.asPoint().y()
-                Zs = feature.attribute(self.height_f)
-                omega = feature.attribute(self.omega_f)
-                phi = feature.attribute(self.phi_f)
-                kappa = feature.attribute(self.kappa_f)
-                if self.crs_vct != self.crs_rst:
-                    Xs_rast, Ys_rast = transf_coord(self.crs_vct,
-                                                    self.crs_rst, Xs, Ys)
-                    c, r = crs2pixel(self.DTM.GetGeoTransform(),
-                                     Xs_rast, Ys_rast)
-                else:
-                    c, r = crs2pixel(self.DTM.GetGeoTransform(), Xs, Ys)
-                #getting Z value from DTM under given center projection point
-                Z = ndimage.map_coordinates(Z_srtm, np.array([[r, c]]).T)[0]
-                R = rotation_matrix(omega,phi,kappa) #rotation matrix
-                #edge points list in image space and other auxiliary lists
-                list_xy, Z_list,\
-                XY_list, XY_list_prev = image_edge_points(self.size_sensor,
-                                                         self.size_across,
-                                                         self.size_along, Z,
-                                                         Zs, self.f, mean_res)
-                #ground coordinates of photo edge points
-                XY_list = ground_edge_points(R, XY_list, XY_list_prev, Z_list,
-                                             self.threshold, list_xy, Xs, Ys,
-                                             Zs, self.DTM, self.f,
-                                             self.crs_rst, self.crs_vct)
-                footprint_pnts = []
-                for xy in XY_list:
-                    footprint_pnts.append(QgsPointXY(xy[0], xy[1]))
-                geom_footprint = QgsGeometry.fromPolygonXY([footprint_pnts])
-                feat_footprint.setGeometry(geom_footprint)
-                provider.addFeatures([feat_footprint])
-                footprint_lay.updateExtents()
-                if self.overlap_bool or self.gsd_bool:
-                    projejction_center = np.array([[Xs], [Ys], [Zs]])
-                    img_coords = np.array([[0], [0], [-self.f]])
-                    image_crs = np.add(projejction_center,
-                                       np.dot(R, img_coords))
-                    X = image_crs[0][0]
-                    Y = image_crs[1][0]
-                    Z = image_crs[2][0]
-                    #calculating logical sum of overlapping images and GSD map
-                    dataset = photo_gsd_overlay(geom_footprint, self.crs_vct,
-                                                self.crs_rst, self.DTM, Xs,
-                                                Ys, Zs, X, Y, Z, self.f,
-                                                self.size_sensor)
-                    ds_list.append(dataset)
-                    upx, xres, xskew,\
-                    upy, yskew, yres = dataset.GetGeoTransform()
-                    cols = dataset.RasterXSize
-                    rows = dataset.RasterYSize
-                    ulx = upx #upper left x
-                    uly = upy #upper left y
-                    lrx = upx + cols*xres + rows*xskew #lower right x
-                    lry = upy + cols*yskew + rows*yres #lower right y
-                    ulx_list.append(ulx)
-                    uly_list.append(uly)
-                    lrx_list.append(lrx)
-                    lry_list.append(lry)
-                # increment progress
-                progress_c += 1
-                if step == 0 or progress_c % step == 0:
-                    self.progress.emit(progress_c/float(feat_count)*100)
-            if self.overlap_bool or self.gsd_bool:
-                #range of output raster of 'overlap' and 'gsd' maps
-                ulx_fp = min(ulx_list)
-                uly_fp = max(uly_list)
-                lrx_fp = max(lrx_list)
-                lry_fp = min(lry_list)
-                cols_fp = int(ceil((lrx_fp - ulx_fp)/xres))
-                rows_fp = int(ceil((lry_fp - uly_fp)/yres))
-                final_overlay = np.zeros((rows_fp, cols_fp))
-                final_gsd = np.ones((rows_fp, cols_fp))*1000
-                geo = [ulx_fp, xres, xskew, uly_fp, yskew, yres]
-                ds_count = len(ds_list)
-                progress_c = 0
-                step = ds_count // 1000
-                #combining the results of all photos
-                for ds in ds_list:
-                    c, r = crs2pixel(geo,ds.GetGeoTransform()[0]+xres/2,
-                                     ds.GetGeoTransform()[3]+yres/2)
-                    c = int(c)
-                    r = int(r)
-                    rows, cols = ds.RasterYSize, ds.RasterXSize
-                    overlay_array = ds.GetRasterBand(1).ReadAsArray()
-                    gsd_array = ds.GetRasterBand(2).ReadAsArray()
-                    i = 0
-                    for w in final_overlay[:]:
-                        j = 0
-                        for k in w[:]:
-                            if i >= r and j >= c and\
-                            i < r + rows and j < c + cols:
-                                final_overlay[i, j] = final_overlay[i, j]\
-                                + overlay_array[i - r, j - c]
-                                final_gsd[i, j] = min(final_gsd[i, j],
-                                                      gsd_array[i - r, j - c])
-                            j = j + 1
-                        i = i + 1
-                    # increment progress
-                    progress_c += 1
-                    if step == 0 or progress_c % step == 0:
-                        self.progress.emit(progress_c/float(ds_count)*100)
-                #saving outputs in temporary folder
-                tmp_overlay = os.path.join(QgsProcessingUtils.tempFolder(), 'overlay.tif')
-                temp_gsd = os.path.join(QgsProcessingUtils.tempFolder(), 'gsd.tif')
-                driver = gdal.GetDriverByName('GTiff')
-                ds_overlay = driver.Create(tmp_overlay, xsize=cols_fp,
-                                           ysize=rows_fp, bands=1,
-                                           eType=gdal.GDT_Float32)
-                ds_gsd = driver.Create(temp_gsd, xsize=cols_fp, ysize=rows_fp,
-                                       bands=1, eType=gdal.GDT_Float32)
-                ds_overlay.GetRasterBand(1).WriteArray(final_overlay)
-                ds_overlay.GetRasterBand(1).SetNoDataValue(0)
-                ds_gsd.GetRasterBand(1).WriteArray(final_gsd)
-                ds_gsd.GetRasterBand(1).SetNoDataValue(1000)
-                #setting CRS of the outputs
-                ds_overlay.SetGeoTransform(geo)
-                ds_gsd.SetGeoTransform(geo) 
-                srs = osr.SpatialReference()
-                srs.ImportFromEPSG(int(self.crs_rst.split(":")[1]))
-                srs.SetWellKnownGeogCS(self.crs_rst)
-                ds_overlay.SetProjection(srs.ExportToWkt())
-                ds_gsd.SetProjection(srs.ExportToWkt())
-                ds_overlay = None
-                ds_gsd = None
-                #changing 'logical sum of overlapping images' layer style
-                if self.overlap_bool:
-                    overlay_layer = QgsRasterLayer(tmp_overlay, "overlapping")
-                    overlay_pr = overlay_layer.dataProvider()
-                    stats = overlay_pr.bandStatistics(1,
-                                                      QgsRasterBandStats.All)
-                    max_v = stats.maximumValue
-                    fcn = QgsColorRampShader()
-                    fcn.setColorRampType(QgsColorRampShader.Exact)
-                    lst = []
-                    clr_step = int(255/max_v)
-                    j = 1
-                    for i in range(int(max_v)):
-                        lst.append(QgsColorRampShader.ColorRampItem(j,
-                            QColor(0 + clr_step,0 + clr_step,0 + clr_step),
-                            str(j)))
-                        clr_step = clr_step + int(255/max_v)
-                        j = j + 1
-                    fcn.setColorRampItemList(lst)
-                    shader = QgsRasterShader()
-                    shader.setRasterShaderFunction(fcn)
-                    renderer = overlay_layer.renderer()
-                    renderer = QgsSingleBandPseudoColorRenderer(overlay_pr,
-                                                                1, shader)
-                    overlay_layer.setRenderer(renderer)
-                    result.append(overlay_layer)
-                #changing 'gsd' layer style
-                if self.gsd_bool:
-                    gsd_layer = QgsRasterLayer(temp_gsd, "gsd_map")
-                    gsd_pr = gsd_layer.dataProvider()
-                    stats = gsd_pr.bandStatistics(1, QgsRasterBandStats.All)
-                    min_v = stats.minimumValue
-                    max_v = stats.maximumValue
-                    fcn = QgsColorRampShader()
-                    fcn.setColorRampType(QgsColorRampShader.Interpolated)
-                    lst = [QgsColorRampShader.ColorRampItem(
-                            min_v, QColor(0,255,0), str(min_v)),
-                            QgsColorRampShader.ColorRampItem(max_v, 
-                            QColor(255,0,0),str(max_v))]
-                    fcn.setColorRampItemList(lst)
-                    shader = QgsRasterShader()
-                    shader.setRasterShaderFunction(fcn)
-                    renderer = gsd_layer.renderer()
-                    renderer = QgsSingleBandPseudoColorRenderer(gsd_pr,
-                                                                1, shader)
-                    gsd_layer.setRenderer(renderer)
-                    result.append(gsd_layer)
-            #changing 'footprint' layer style
-            if self.footprint_bool:
-                renderer = footprint_lay.renderer()
-                symbol = renderer.symbol()
-                prop = {'color':'255,0,0,30', 'color_border':'#000000',
-                        'width_border':'0.2'}
-                my_symbol = symbol.createSimple(prop)
-                renderer.setSymbol(my_symbol)
-                footprint_lay.triggerRepaint()
-                result.append(footprint_lay)
-            if self.killed is False:
-                self.progress.emit(100)
-        except Exception as e:
-            self.error.emit(e, traceback.format_exc())
-            print('Error: ',traceback.format_exc())
-        self.finished.emit(result)
-        self.enabled.emit(True)
-        
-    def run_followingTerrain(self):
-        result = []
-        try:
-            photo_layer = QgsVectorLayer("Polygon?crs="+str(self.crs_vct),
-                                        "photo", "memory")
-            provPhoto = photo_layer.dataProvider()
-            featPhoto = QgsFeature()
-            feat_count = self.layer.featureCount()
-            progress_c = 0
-            step = feat_count // 1000
-            feats = self.layer.getFeatures()
-            for f in feats:
-                if self.killed is True:
-                    # kill request received, exit loop early
-                    break
-                #projection center coordinates
-                xg = f.geometry().asPoint().x()
-                yg = f.geometry().asPoint().y()
-                kappa = float(f.attribute('Kappa [deg]'))*pi/180
-                #range of photo
-                x1 = xg + cos(kappa + self.theta - pi)*self.dist
-                y1 = yg + sin(kappa + self.theta - pi)*self.dist
-                x2 = xg + cos(kappa - self.theta + pi)*self.dist
-                y2 = yg + sin(kappa - self.theta + pi)*self.dist
-                x3 = xg + cos(kappa + self.theta)*self.dist
-                y3 = yg + sin(kappa + self.theta)*self.dist
-                x4 = xg + cos(kappa - self.theta)*self.dist
-                y4 = yg + sin(kappa - self.theta)*self.dist
-                photo = [QgsPointXY(x1, y1), QgsPointXY(x2, y2),
-                         QgsPointXY(x3, y3), QgsPointXY(x4, y4)]
-                geomPhoto = QgsGeometry.fromPolygonXY([photo])
-                featPhoto.setGeometry(geomPhoto)
-                provPhoto.addFeature(featPhoto)
-                #min and max height DTM in the range of photo
-                hMin, hMax = minmaxheight(photo_layer, self.DTM)
-                mean_h = (hMax + hMin)/2
-                w0 = self.w + mean_h
-                self.layer.startEditing()
-                self.layer.changeAttributeValue(f.id(), 4, round(w0,2))
-                self.layer.commitChanges()
-                photo_layer.startEditing()
-                photo_layer.deleteFeature(f.id())
-                photo_layer.commitChanges()
-                # increment progress
-                progress_c += 1
-                if step == 0 or progress_c % step == 0:
-                    self.progress.emit(progress_c/float(feat_count)*100)
-            if self.killed is False:
-                self.progress.emit(100)
-                #deleting reduntant fields
-                self.layer.startEditing()
-                self.layer.deleteAttributes([8,9,10])
-                self.layer.commitChanges()
-                self.layer_pol.startEditing()
-                self.layer_pol.deleteAttributes([2,3])
-                self.layer_pol.commitChanges()
-                #changing layer style
-                renderer = self.layer_pol.renderer()
-                symbol = renderer.symbol()
-                prop = {'color':'200,200,200,30', 'color_border':'#000000',
-                        'width_border':'0.2'}
-                my_symbol = symbol.createSimple(prop)
-                renderer.setSymbol(my_symbol)
-                self.layer_pol.triggerRepaint()
-                self.layer_pol.setName('photos')
-                self.layer.setName('projection centres')
-                result.append(self.layer)
-                result.append(self.layer_pol)
-        except Exception as e:
-            # forward the exception upstream
-            self.error.emit(e, traceback.format_exc())
-            print('Error: ',traceback.format_exc())
-        self.finished.emit(result)
-        self.enabled.emit(True)
-                
-    def run_altitudeStrip(self):
-        result = []
-        try:
-            progress_c = 0
-            step = self.s // 1000
-            feat_strip = QgsFeature()
-            for t in range(1,self.s+1):
-                if self.killed is True:
-                    # kill request received, exit loop early
-                    break
-                strip_nr = '%(StripNr)04d'% {'StripNr': t}
-                feats = self.layer.getFeatures('"Strip" = '+str(strip_nr))
-                nrP_max = 0
-                nrP_min = 1000000
-                #finding first and last photo of strip
-                for f in feats:
-                    if int(f.attribute('Photo Number')) > nrP_max:
-                        nrP_max = int(f.attribute('Photo Number'))
-                        xg_max = f.geometry().asPoint().x()
-                        yg_max = f.geometry().asPoint().y()
-                    if int(f.attribute('Photo Number')) < nrP_min:
-                        nrP_min = int(f.attribute('Photo Number'))
-                        xg_min = f.geometry().asPoint().x()
-                        yg_min = f.geometry().asPoint().y()
-                    kappa = float(f.attribute('Kappa [deg]'))*pi/180
-                    if self.tab_widg_cor:
-                        BuffNr = int(f.attribute('BuffNr'))
-                #range of the strip
-                xmin1 = xg_min + cos(kappa + self.theta - pi)*self.dist
-                ymin1 = yg_min + sin(kappa + self.theta - pi)*self.dist
-                xmin2 = xg_min + cos(kappa - self.theta + pi)*self.dist
-                ymin2 = yg_min + sin(kappa - self.theta + pi)*self.dist
-                xmax1 = xg_max + cos(kappa + self.theta)*self.dist
-                ymax1 = yg_max + sin(kappa + self.theta)*self.dist
-                xmax2 = xg_max + cos(kappa - self.theta)*self.dist
-                ymax2 = yg_max + sin(kappa - self.theta)*self.dist
-                one_strip = [QgsPointXY(xmin1, ymin1),
-                                   QgsPointXY(xmin2, ymin2),
-                                   QgsPointXY(xmax1, ymax1),
-                                   QgsPointXY(xmax2, ymax2)]
-                g_strip = QgsGeometry.fromPolygonXY([one_strip])
-                #common part of strip and Area of Interest
-                if self.tab_widg_cor:
-                    common = g_strip.intersection(self.g_line_list[BuffNr\
-                                                                        -1])
-                else:
-                    common = g_strip.intersection(self.geom_aoi)
-                feat_strip.setGeometry(common)
-                common_lay = QgsVectorLayer("Polygon?crs="+str(self.crs_vct),
-                                          "row", "memory")
-                prov_com = common_lay.dataProvider()
-                prov_com.addFeature(feat_strip)
-                h_min, h_max = minmaxheight(common_lay, self.DTM)
-                mean_h = h_max - (h_max - h_min)/3
-                w0 = self.w + mean_h
-                self.layer.startEditing()
-                for k in range(nrP_min, nrP_max + 1):
-                    self.layer.changeAttributeValue(k, 4, round(w0,2))
-                self.layer.commitChanges()
-                # increment progress
-                progress_c += 1
-                if step == 0 or progress_c % step == 0:
-                    self.progress.emit(progress_c/self.s*100)
-            if self.killed is False:
-                self.progress.emit(100)
-                #deleting redundant fields
-                if self.tab_widg_cor:
-                    self.layer.startEditing()
-                    self.layer.deleteAttributes([8,9,10])
-                    self.layer.commitChanges()
-                    self.layer_pol.startEditing()
-                    self.layer_pol.deleteAttributes([2,3])
-                    self.layer_pol.commitChanges()
-                #changing layer style
-                renderer = self.layer_pol.renderer()
-                symbol = renderer.symbol()
-                prop = {'color':'200,200,200,30', 'color_border':'#000000',
-                        'width_border':'0.2'}
-                my_symbol = symbol.createSimple(prop)
-                renderer.setSymbol(my_symbol)
-                self.layer_pol.triggerRepaint()
-                #changing layers name
-                self.layer_pol.setName('photos')
-                self.layer.setName('projection centres')
-                result.append(self.layer)
-                result.append(self.layer_pol)
-        except Exception as e:
-            # forward the exception upstream
-            self.error.emit(e, traceback.format_exc())
-            print('Error: ',traceback.format_exc())
-        self.finished.emit(result)
-        self.enabled.emit(True)        
-        
-    def kill(self):
-        self.killed = True
 
 
 class FlightPlannerDialog(QtWidgets.QDialog, FORM_CLASS):
@@ -972,30 +58,32 @@ class FlightPlannerDialog(QtWidgets.QDialog, FORM_CLASS):
         """Constructor."""
         super(FlightPlannerDialog, self).__init__(parent)
         # Set up the user interface from Designer through FORM_CLASS.
-        # After self.setupUi() you can access any designer object by doing
-        # self.<objectname>, and you can use autoconnect slots - see
-        # http://qt-project.org/doc/qt-4.8/designer-using-a-ui-file.html
-        # #widgets-and-dialogs-with-auto-connect
         self.setupUi(self)
         self.tabWidgetBlock = True
         self.tabWidgetCorridor = False
+
+        # Set up filters for ComboBoxes
         self.pcMapLayCombB.setFilters(QgsMapLayerProxyModel.PointLayer)
-        self.hFieldComboBox.setFilters(QgsFieldProxyModel.Numeric)
+        self.altitudeFieldComboBox.setFilters(QgsFieldProxyModel.Numeric)
         self.omegaFieldComboBox.setFilters(QgsFieldProxyModel.Numeric)
         self.phiFieldComboBox.setFilters(QgsFieldProxyModel.Numeric)
         self.kappaFieldComboBox.setFilters(QgsFieldProxyModel.Numeric)
         self.dtmMapLayCombB.setFilters(QgsMapLayerProxyModel.RasterLayer)
         self.aoiMapLayCombB.setFilters(QgsMapLayerProxyModel.PolygonLayer)
         self.corMapLayCombB.setFilters(QgsMapLayerProxyModel.LineLayer)
-        self.cam_lib_path = os.path.join(os.path.dirname(os.path.abspath(__file__)),'cameras_library')
+
+        # Set up ComboBox of camera
+        self.cam_lib_path = os.path.join(
+            os.path.dirname(os.path.abspath(__file__)), 'cameras_library')
         self.cameras_list = os.listdir(self.cam_lib_path)
         self.combBcam.addItems(self.cameras_list)
-        self.combBcam.setItemText (0, 'Select camera or type parameters')
+        self.combBcam.setItemText(0, 'Select camera or type parameters')
 
     def startWorker_control(self, pnt_lay, h, o, p, k, f, s_sensor, s_along,
                             s_across, crs_vct, crs_rst, DTM, overlap_bool,
                             gsd_bool, footprint_bool, t):
-        # create a new worker instance
+        """Start worker for control module of plugin."""
+        # Create a new worker instance
         worker = Worker(pointLayer=pnt_lay, hField=h, omegaField=o,
                         phiField=p, kappaField=k, focal=f,
                         size_sensor=s_sensor, size_along=s_along,
@@ -1003,8 +91,9 @@ class FlightPlannerDialog(QtWidgets.QDialog, FORM_CLASS):
                         crsRasterLayer=crs_rst, DTM=DTM, overlap=overlap_bool,
                         gsd=gsd_bool, footprint=footprint_bool,
                         threshold=t)
-        self.pBcancel.clicked.connect(worker.kill)    
-        # start the worker in a new thread
+
+        self.pBcancel.clicked.connect(worker.kill)
+        # Start the worker in a new thread
         thread = QThread(self)
         worker.moveToThread(thread)
         worker.finished.connect(self.workerFinished)
@@ -1012,21 +101,35 @@ class FlightPlannerDialog(QtWidgets.QDialog, FORM_CLASS):
         worker.progress.connect(self.progressBar.setValue)
         worker.enabled.connect(self.pBacceptControl.setEnabled)
         worker.enabled.connect(self.pBaccept.setEnabled)
-        worker.enabled.connect(self.pcMapLayCombB.setEnabled)
-        worker.enabled.connect(self.dtmMapLayCombB.setEnabled)
         thread.started.connect(worker.run_control)
         thread.start()
         self.thread = thread
         self.worker = worker
 
-    def startWorker_terrainFollowing(self, pnt_lay, theta, dist,
-                                     crs_vct, DTM, w, layer_pol):
-        # create a new worker instance
-        worker = Worker(pointLayer=pnt_lay, theta=theta, distance=dist,
-                        crsVectorLayer=crs_vct, DTM=DTM, height=w,
-                        polygonLayer=layer_pol)
-        self.pBcancel.clicked.connect(worker.kill)    
-        # start the worker in a new thread
+    def startWorker_updateAltitude(self, pnt_lay, theta, dist, crs_vct, DTM, w,
+                                   layer_pol, s=None, tabWidget=None, geom=None):
+        """Start a worker for update altitude of flight in 'altitude for
+        each strip' or 'terraing following' mode."""
+        if self.rBstripsAltitude.isChecked():
+            if tabWidget:
+                worker = Worker(pointLayer=pnt_lay, theta=theta, distance=dist,
+                                crsVectorLayer=crs_vct, DTM=DTM, height=w,
+                                strips=s, tabWidg=tabWidget, LineRangeList=geom,
+                                polygonLayer=layer_pol)
+            else:
+                worker = Worker(pointLayer=pnt_lay, theta=theta, distance=dist,
+                                crsVectorLayer=crs_vct, DTM=DTM, height=w,
+                                strips=s, tabWidg=tabWidget, Range=geom,
+                                polygonLayer=layer_pol)
+
+        elif self.rBterrainFollowing.isChecked():
+            worker = Worker(pointLayer=pnt_lay, theta=theta, distance=dist,
+                            crsVectorLayer=crs_vct, DTM=DTM, height=w,
+                            polygonLayer=layer_pol)
+
+        # Create a new worker instance                  
+        self.pBcancel.clicked.connect(worker.kill)
+        # Start the worker in a new thread
         thread = QThread(self)
         worker.moveToThread(thread)
         worker.finished.connect(self.workerFinished)
@@ -1034,46 +137,16 @@ class FlightPlannerDialog(QtWidgets.QDialog, FORM_CLASS):
         worker.progress.connect(self.progressBar.setValue)
         worker.enabled.connect(self.pBaccept.setEnabled)
         worker.enabled.connect(self.pBacceptControl.setEnabled)
-        worker.enabled.connect(self.dtmMapLayCombB.setEnabled)
-        worker.enabled.connect(self.aoiMapLayCombB.setEnabled)
-        worker.enabled.connect(self.corMapLayCombB.setEnabled)
-        worker.enabled.connect(self.pBgetHeights.setEnabled)
-        thread.started.connect(worker.run_followingTerrain)
+
+        if self.rBstripsAltitude.isChecked():
+            thread.started.connect(worker.run_altitudeStrip)
+        elif self.rBterrainFollowing.isChecked():
+            thread.started.connect(worker.run_followingTerrain)
+
         thread.start()
         self.thread = thread
         self.worker = worker
-                
-    def startWorker_altitudeStrip(self, pnt_lay, theta, dist, crs_vct, DTM,
-                                  w, s, tabWidget, geom, layer_pol):
-        if tabWidget:
-            worker = Worker(pointLayer=pnt_lay, theta=theta, distance=dist,
-                            crsVectorLayer=crs_vct, DTM=DTM, height=w,
-                            strips=s, tabWidg=tabWidget, LineRangeList=geom,
-                            polygonLayer=layer_pol)
-        else:
-            worker = Worker(pointLayer=pnt_lay, theta=theta, distance=dist,
-                            crsVectorLayer=crs_vct, DTM=DTM, height=w,
-                            strips=s, tabWidg=tabWidget, Range=geom,
-                            polygonLayer=layer_pol)
-        # create a new worker instance                  
-        self.pBcancel.clicked.connect(worker.kill)    
-        # start the worker in a new thread
-        thread = QThread(self)
-        worker.moveToThread(thread)
-        worker.finished.connect(self.workerFinished)
-        worker.error.connect(self.workerError)
-        worker.progress.connect(self.progressBar.setValue)
-        worker.enabled.connect(self.pBaccept.setEnabled)
-        worker.enabled.connect(self.pBacceptControl.setEnabled)
-        worker.enabled.connect(self.dtmMapLayCombB.setEnabled)
-        worker.enabled.connect(self.aoiMapLayCombB.setEnabled)
-        worker.enabled.connect(self.corMapLayCombB.setEnabled)
-        worker.enabled.connect(self.pBgetHeights.setEnabled)
-        thread.started.connect(worker.run_altitudeStrip)
-        thread.start()
-        self.thread = thread
-        self.worker = worker
-        
+
     def workerFinished(self, result):
         # clean up the worker and thread
         self.worker.deleteLater()
@@ -1088,26 +161,27 @@ class FlightPlannerDialog(QtWidgets.QDialog, FORM_CLASS):
             print('Something went wrong!')
 
     def workerError(self, e, exception_string):
-        print('Worker thread raised an exception: '.format(exception_string))
+        print(f'Worker thread raised an exception: {exception_string}')
         save_error()
-        QMessageBox.about(self,'Error','See error log file in plugin folder')
-            
+        QMessageBox.about(self, 'Error', 'See error log file in plugin folder')
+
     def on_pBcancel_clicked(self):
         pass
-        
+
     def on_progressBar_valueChanged(self):
         pass
-    
-    def on_combBcam_highlighted(self, camera_name):
+
+    def on_combBcam_highlighted(self):
         if self.combBcam.currentText() == 'Select camera or type parameters':
             self.combBcam.removeItem(self.combBcam.currentIndex())
             self.combBcam.insertItem(self.combBcam.currentIndex(),
-                self.cameras_list[self.combBcam.currentIndex()])
-        
+                                     self.cameras_list[self.combBcam.currentIndex()])
+
     def on_combBcam_activated(self, camera_name):
         if isinstance(camera_name, str):
             dict = {}
-            with open(os.path.join(self.cam_lib_path, str(camera_name))) as camera:
+            with open(os.path.join(
+                    self.cam_lib_path, str(camera_name))) as camera:
                 for line in camera:
                     (key, val) = line.split(':')
                     dict[key] = val
@@ -1115,52 +189,52 @@ class FlightPlannerDialog(QtWidgets.QDialog, FORM_CLASS):
                 self.lEsensor.setText(dict['Sensor size'].rstrip())
                 self.lEalong.setText(dict['Size along'].rstrip())
                 self.lEacross.setText(dict['Size across'].rstrip())
-    
+
     def on_lEfocal_textChanged(self):
         pass
-        
+
     def on_lEgsd_textChanged(self):
         pass
-        
+
     def on_lEsensor_textChanged(self):
         pass
-        
+
     def on_lEalong_textChanged(self):
         pass
-        
+
     def on_lEacross_textChanged(self):
         pass
-        
+
     def on_lEmaxH_textChanged(self):
         pass
-        
+
     def on_lEminH_textChanged(self):
         pass
-        
+
     def on_lEp_textChanged(self):
         pass
-        
+
     def on_lEq_textChanged(self):
         pass
-        
+
     def on_dSpinBoxBuffer_valueChanged(self):
         pass
-        
+
     def on_dSpinBoxThreshold_valueChanged(self):
         pass
-        
+
     def on_rBoneAltitude_toggled(self):
         pass
-        
+
     def on_rBstripsAltitude_toggled(self):
         pass
-        
+
     def on_rBterrainFollowing_toggled(self):
         pass
-        
+
     def on_cBoverlapPict_stateChanged(self):
         pass
-        
+
     def on_cBfootprint_stateChanged(self):
         if self.cBfootprint.isChecked():
             self.dSpinBoxThreshold.setEnabled(True)
@@ -1170,39 +244,39 @@ class FlightPlannerDialog(QtWidgets.QDialog, FORM_CLASS):
             self.dSpinBoxThreshold.setEnabled(False)
             self.label_iteration.setEnabled(False)
             self.label_threshold.setEnabled(False)
-            
+
     def on_cBgsdMap_stateChanged(self):
         pass
-        
+
     def on_cBincreaseOverlap_stateChanged(self):
         try:
-            focal = float(self.lEfocal.text().replace(',','.'))
-            gsd = float(self.lEgsd.text().replace(',','.'))
-            sensor = float(self.lEsensor.text().replace(',','.'))
-            max_h = float(self.lEmaxH.text().replace(',','.'))
-            min_h = float(self.lEminH.text().replace(',','.'))
-            p0 = float(self.lEp.text().replace(',','.'))
-            q0 = float(self.lEq.text().replace(',','.'))
-            W = ((gsd*10)/(sensor/1000)*focal)/1000
+            focal = float(self.lEfocal.text().replace(',', '.'))
+            gsd = float(self.lEgsd.text().replace(',', '.'))
+            sensor = float(self.lEsensor.text().replace(',', '.'))
+            max_h = float(self.lEmaxH.text().replace(',', '.'))
+            min_h = float(self.lEminH.text().replace(',', '.'))
+            p0 = float(self.lEp.text().replace(',', '.'))
+            q0 = float(self.lEq.text().replace(',', '.'))
+            W = ((gsd * 10) / (sensor / 1000) * focal) / 1000
             if self.cBincreaseOverlap.isChecked():
-                #remembering old values of overlap p, sidelap q
-                self.p0_prev = float(self.lEp.text().replace(',','.'))
-                self.q0_prev = float(self.lEq.text().replace(',','.'))
-                #new values of overlap p, sidelap q
-                self.p = p0/100 + 0.5*((max_h - min_h)/2)/W
-                self.q = q0/100 + 0.7*((max_h - min_h)/2)/W
+                # remember old values of overlap p, sidelap q
+                self.p0_prev = float(self.lEp.text().replace(',', '.'))
+                self.q0_prev = float(self.lEq.text().replace(',', '.'))
+                # new values of overlap p, sidelap q
+                self.p = p0 / 100 + 0.5 * ((max_h - min_h) / 2) / W
+                self.q = q0 / 100 + 0.7 * ((max_h - min_h) / 2) / W
             else:
-                self.p = self.p0_prev/100
-                self.q = self.q0_prev/100
+                self.p = self.p0_prev / 100
+                self.q = self.q0_prev / 100
         except ValueError:
-            QMessageBox.about(self,'Error','Type float numbers')
+            QMessageBox.about(self, 'Error', 'Type float numbers')
         else:
-            self.lEp.setText(str(round(self.p*100, 1)))
-            self.lEq.setText(str(round(self.q*100, 1)))
-        
+            self.lEp.setText(str(round(self.p * 100, 1)))
+            self.lEq.setText(str(round(self.q * 100, 1)))
+
     def on_sBmultipleBase(self):
         pass
-        
+
     def on_pcMapLayCombB_layerChanged(self):
         try:
             if self.pcMapLayCombB.currentLayer():
@@ -1210,25 +284,25 @@ class FlightPlannerDialog(QtWidgets.QDialog, FORM_CLASS):
                 self.crs_vct_ctrl = proj_cent_layer.sourceCrs().authid()
                 crs = QgsCoordinateReferenceSystem(self.crs_vct_ctrl)
                 if crs.isGeographic():
-                    QMessageBox.about(self,'Error','CRS of layer cannot be'\
-                                    + 'geographic')
-                    self.hFieldComboBox.setLayer(None)
+                    QMessageBox.about(self, 'Error', 'CRS of layer cannot be' \
+                                      + 'geographic')
+                    self.altitudeFieldComboBox.setLayer(None)
                     self.omegaFieldComboBox.setLayer(None)
                     self.phiFieldComboBox.setLayer(None)
                     self.kappaFieldComboBox.setLayer(None)
                 else:
-                    self.hFieldComboBox.setLayer(proj_cent_layer)
+                    self.altitudeFieldComboBox.setLayer(proj_cent_layer)
                     self.omegaFieldComboBox.setLayer(proj_cent_layer)
                     self.phiFieldComboBox.setLayer(proj_cent_layer)
                     self.kappaFieldComboBox.setLayer(proj_cent_layer)
         except:
-            QMessageBox.about(self,'Error','See error log file in plugin'\
-            + 'folder')
+            QMessageBox.about(self, 'Error', 'See error log file in plugin' \
+                              + 'folder')
             save_error()
 
     def on_hFieldComboBox_fieldChanged(self):
         pass
-        
+
     def on_omegaFieldComboBox_fieldChanged(self):
         pass
 
@@ -1237,14 +311,20 @@ class FlightPlannerDialog(QtWidgets.QDialog, FORM_CLASS):
 
     def on_kappaFieldComboBox_fieldChanged(self):
         pass
-        
+
     @pyqtSlot()
     def on_pBgetHeights_clicked(self):
         try:
             if self.tabWidgetBlock:
                 h_min, h_max = minmaxheight(self.AreaOfInterest, self.DTM)
             else:
-                #setting minimum buffer size to be able to get heights
+                # setting minimum buffer size to be able to get heights
+                if self.crs_rst != self.crs_vct:
+                    transf_rst_vct = Transformer.from_crs(self.crs_rst,
+                                                          self.crs_vct,
+                                                          always_xy=True)
+                else:
+                    transf_rst_vct = None
                 g_rst = self.raster.GetGeoTransform()
                 pix_width = g_rst[1]
                 pix_height = -g_rst[5]
@@ -1252,50 +332,49 @@ class FlightPlannerDialog(QtWidgets.QDialog, FORM_CLASS):
                 uply = g_rst[3]
                 uplx_n = uplx + pix_width
                 uply_n = uply + pix_height
-                xo, yo = transf_coord(self.crs_rst, self.crs_vct, uplx, uply)
-                xo1, yo1 = transf_coord(self.crs_rst, self.crs_vct,
-                                        uplx_n, uply_n)
-                min_buff_size = max(ceil(fabs(xo1-xo)),ceil(fabs(yo1-yo)))
-                self.dSpinBoxBuffer.setMinimum(min_buff_size/2)
+                xo, yo = transf_coord(transf_rst_vct, uplx, uply)
+                xo1, yo1 = transf_coord(transf_rst_vct, uplx_n, uply_n)
+                min_buff_size = max(ceil(fabs(xo1 - xo)), ceil(fabs(yo1 - yo)))
+                self.dSpinBoxBuffer.setMinimum(min_buff_size / 2)
                 buffLine = processing.run("native:buffer",
-                            {'INPUT':self.pathLine,
-                            'DISTANCE':self.dSpinBoxBuffer.value(),
-                            'SEGMENTS':5,'END_CAP_STYLE':0,'JOIN_STYLE':0,
-                            'MITER_LIMIT':2,'DISSOLVE':False,
-                            'OUTPUT':'TEMPORARY_OUTPUT'})
+                                          {'INPUT': self.pathLine,
+                                           'DISTANCE': self.dSpinBoxBuffer.value(),
+                                           'SEGMENTS': 5, 'END_CAP_STYLE': 0, 'JOIN_STYLE': 0,
+                                           'MITER_LIMIT': 2, 'DISSOLVE': False,
+                                           'OUTPUT': 'TEMPORARY_OUTPUT'})
                 self.bufferedLine = buffLine['OUTPUT']
                 h_min, h_max = minmaxheight(self.bufferedLine, self.DTM)
         except:
-            QMessageBox.about(self,'Error','Get heights from DTM failed')
+            QMessageBox.about(self, 'Error', 'Get heights from DTM failed')
             save_error()
         else:
             self.lEminH.setText(str(h_min))
             self.lEmaxH.setText(str(h_max))
-            
+
     def on_corMapLayCombB_layerChanged(self):
         self.CorLine = self.corMapLayCombB.currentLayer()
         if not self.CorLine == None:
             self.crs_vct = self.CorLine.sourceCrs().authid()
             if QgsCoordinateReferenceSystem(self.crs_vct).isGeographic():
-                QMessageBox.about(self,'Error',
+                QMessageBox.about(self, 'Error',
                                   'CRS of layer cannot be geographic')
                 self.corMapLayCombB.setLayer(None)
-            else:           
+            else:
                 self.pathLine = self.CorLine.dataProvider().dataSourceUri()
-        
+
     def on_aoiMapLayCombB_layerChanged(self):
         self.AreaOfInterest = self.aoiMapLayCombB.currentLayer()
         if not self.AreaOfInterest == None:
             self.crs_vct = self.AreaOfInterest.sourceCrs().authid()
             if QgsCoordinateReferenceSystem(self.crs_vct).isGeographic():
-                QMessageBox.about(self,'Error',
+                QMessageBox.about(self, 'Error',
                                   'CRS of layer cannot be geographic')
                 self.aoiMapLayCombB.setLayer(None)
-            else:      
+            else:
                 features = self.AreaOfInterest.getFeatures()
                 for feature in features:
                     self.geom_AoI = feature.geometry()
-            
+
     def on_dtmMapLayCombB_layerChanged(self):
         if self.dtmMapLayCombB.currentLayer():
             self.DTM = self.dtmMapLayCombB.currentLayer()
@@ -1305,7 +384,7 @@ class FlightPlannerDialog(QtWidgets.QDialog, FORM_CLASS):
             self.rBstripsAltitude.setEnabled(True)
             self.rBterrainFollowing.setEnabled(True)
             self.pBgetHeights.setEnabled(True)
-    
+
     def on_tabWidget_currentChanged(self):
         if self.tabWidget.currentIndex() == 0:
             self.tabWidgetBlock = True
@@ -1313,249 +392,271 @@ class FlightPlannerDialog(QtWidgets.QDialog, FORM_CLASS):
         else:
             self.tabWidgetBlock = False
             self.tabWidgetCorridor = True
-            
+
     def on_dial_valueChanged(self):
         if self.dial.value() > 180:
-            self.sBdirection.setValue(self.dial.value()-180)
+            self.sBdirection.setValue(self.dial.value() - 180)
         else:
-            self.sBdirection.setValue(self.dial.value()+180)
-           
+            self.sBdirection.setValue(self.dial.value() + 180)
+
     def on_sBdirection_valueChanged(self):
         if self.sBdirection.value() > 180:
-            self.dial.setValue(self.sBdirection.value()-180)
+            self.dial.setValue(self.sBdirection.value() - 180)
         else:
-            self.dial.setValue(self.sBdirection.value()+180)
+            self.dial.setValue(self.sBdirection.value() + 180)
 
     def on_sBexceedingExtremeStrips(self):
         pass
-            
+
     @pyqtSlot()
     def on_pBaccept_clicked(self):
+        """Push Button to make a flight plan."""
         try:
-            focal = float(self.lEfocal.text().replace(',','.'))
-            gsd = float(self.lEgsd.text().replace(',','.'))
-            sensor = float(self.lEsensor.text().replace(',','.'))
+            focal = float(self.lEfocal.text().replace(',', '.'))
+            gsd = float(self.lEgsd.text().replace(',', '.'))
+            sensor = float(self.lEsensor.text().replace(',', '.'))
             along = int(self.lEalong.text())
             across = int(self.lEacross.text())
-            max_h = float(self.lEmaxH.text().replace(',','.'))
-            min_h = float(self.lEminH.text().replace(',','.'))
-            p0 = float(self.lEp.text().replace(',','.'))
-            q0 = float(self.lEq.text().replace(',','.'))
+            max_h = float(self.lEmaxH.text().replace(',', '.'))
+            min_h = float(self.lEminH.text().replace(',', '.'))
+            p0 = float(self.lEp.text().replace(',', '.'))
+            q0 = float(self.lEq.text().replace(',', '.'))
             mult_base = self.sBmultipleBase.value()
             x_percent = self.sBexceedingExtremeStrips.value()
-            #flight height above mean reference terrain height
-            w = ((gsd*10)/(sensor/1000)*focal)/1000
-            mean_h = (max_h+min_h)/2
-            #above sea level flight height
+
+            # flight height above mean terrain height
+            w = ((gsd * 10) / (sensor / 1000) * focal) / 1000
+            mean_h = (max_h + min_h) / 2
+            # above sea level flight height
             w0 = w + mean_h
             if not self.cBincreaseOverlap.isChecked():
-                self.p = p0/100
-                self.q = q0/100
-            #image length along and across flight direction[m]
-            len_along = along*gsd/100
-            len_across = across*gsd/100
-            #longitudinal base Bx, transverse base By
-            Bx = len_along*(1-self.p)
-            By = len_across*(1-self.q)
+                self.p = p0 / 100
+                self.q = q0 / 100
+            # image length along and across flight direction[m]
+            len_along = along * gsd / 100
+            len_across = across * gsd / 100
+            # longitudinal base Bx, transverse base By
+            Bx = len_along * (1 - self.p)
+            By = len_across * (1 - self.q)
             strip = 0
             photo = 0
+
             if self.tabWidgetBlock:
                 angle = 90 - self.sBdirection.value()
                 if 90 - self.sBdirection.value() < 0:
                     angle = 90 - self.sBdirection.value() + 360
-                #bounding box equotations and dimensions Dx, Dy
+                # bounding box equotations and dimensions Dx, Dy
                 a, b, a2, b2, Dx, Dy = bounding_box_at_angle(angle,
-                                                            self.geom_AoI)
+                                                             self.geom_AoI)
                 pc_lay, photo_lay, s_nr, p_nr = projection_centres(
                     angle, self.geom_AoI, self.crs_vct, a, b, a2, b2, Dx, Dy,
                     Bx, By, len_along, len_across, x_percent, mult_base, w0,
                     strip, photo)
+
             elif self.tabWidgetCorridor:
                 exploded_lines = processing.run("native:explodelines",
-                                            {'INPUT':self.pathLine,
-                                            'OUTPUT':'TEMPORARY_OUTPUT'})
+                                                {'INPUT': self.pathLine,
+                                                 'OUTPUT': 'TEMPORARY_OUTPUT'})
                 exp_lines = exploded_lines['OUTPUT']
-                #buffer for each exp_lines
+                # buffer for each exp_lines
                 buffered_exp_lines = processing.run("native:buffer",
-                    {'INPUT':exp_lines,'DISTANCE':self.dSpinBoxBuffer.value(),
-                    'SEGMENTS':5,'END_CAP_STYLE':0,'JOIN_STYLE':0,
-                    'MITER_LIMIT':2,'DISSOLVE':False,
-                    'OUTPUT':'TEMPORARY_OUTPUT'})
+                                                    {'INPUT': exp_lines, 'DISTANCE': self.dSpinBoxBuffer.value(),
+                                                     'SEGMENTS': 5, 'END_CAP_STYLE': 0, 'JOIN_STYLE': 0,
+                                                     'MITER_LIMIT': 2, 'DISSOLVE': False,
+                                                     'OUTPUT': 'TEMPORARY_OUTPUT'})
                 buff_exp_lines = buffered_exp_lines['OUTPUT']
                 feats_exp_lines = exp_lines.getFeatures()
                 pc_lay_list = []
                 photo_lay_list = []
                 line_buf_list = []
-                #building projection centres and photos layer for each line
+
+                # building projection centres and photos layer for each line
                 for feat_exp in feats_exp_lines:
                     x_start = feat_exp.geometry().asPolyline()[0].x()
                     y_start = feat_exp.geometry().asPolyline()[0].y()
                     x_end = feat_exp.geometry().asPolyline()[1].x()
                     y_end = feat_exp.geometry().asPolyline()[1].y()
-                    #equation of corridor line
+                    # equation of corridor line
                     a_line, b_line = line(y_start, y_end, x_start, x_end)
-                    angle = atan2(a_line,1)*180/pi
+                    angle = atan(a_line) * 180 / pi
+
                     if angle < 0:
-                        angle = angle + 360
+                        angle = angle + 180
+
                     featbuff_exp = buff_exp_lines.getFeature(feat_exp.id())
-                    #geometry object of line buffer
+                    # geometry object of line buffer
                     geom_line_buf = featbuff_exp.geometry()
                     line_buf_list.append(geom_line_buf)
                     a, b, a2, b2, Dx, Dy = bounding_box_at_angle(angle,
-                                                                geom_line_buf)
-                    #projection centres layer and photos layer for given line
+                                                                 geom_line_buf)
+                    # projection centres layer and photos layer for given line
                     pc_lay, photo_lay, s_nr, p_nr = projection_centres(
                         angle, geom_line_buf, self.crs_vct, a, b, a2, b2, Dx,
                         Dy, Bx, By, len_along, len_across, x_percent,
                         mult_base, w0, strip, photo)
-                    #adding helping field for function 'alt. for each strip'
+                    # adding helping field for function 'alt. for each strip'
                     pc_lay.startEditing()
-                    pc_lay.addAttribute(QgsField("BuffNr",QVariant.Int))
+                    pc_lay.addAttribute(QgsField("BuffNr", QVariant.Int))
                     pc_lay.selectAll()
-                    for f in range(min(pc_lay.selectedFeatureIds())-1,\
-                                max(pc_lay.selectedFeatureIds())+1):
+
+                    for f in range(min(pc_lay.selectedFeatureIds()) - 1, \
+                                   max(pc_lay.selectedFeatureIds()) + 1):
                         pc_lay.changeAttributeValue(f, 8, feat_exp.id())
+
                     pc_lay.commitChanges()
                     pc_lay_list.append(pc_lay)
                     photo_lay_list.append(photo_lay)
                     strip = s_nr
                     photo = p_nr
-                #merging results for every line
+
+                # merging results for every line
                 merged_pnt_lay = processing.run("native:mergevectorlayers",
-                                {'LAYERS':pc_lay_list,
-                                'CRS':None,'OUTPUT':'TEMPORARY_OUTPUT'})
+                                                {'LAYERS': pc_lay_list,
+                                                 'CRS': None, 'OUTPUT': 'TEMPORARY_OUTPUT'})
                 pc_lay = merged_pnt_lay['OUTPUT']
                 merged_poly_lay = processing.run("native:mergevectorlayers",
-                                {'LAYERS':photo_lay_list,'CRS':None,
-                                'OUTPUT':'TEMPORARY_OUTPUT'})
+                                                 {'LAYERS': photo_lay_list, 'CRS': None,
+                                                  'OUTPUT': 'TEMPORARY_OUTPUT'})
                 photo_lay = merged_poly_lay['OUTPUT']
             s = int(pc_lay.maximumValue(0))
-            theta = fabs(atan2(len_across/2,len_along/2))
-            dist = sqrt((len_along/2)**2+(len_across/2)**2)
+            theta = fabs(atan2(len_across / 2, len_along / 2))
+            dist = sqrt((len_along / 2) ** 2 + (len_across / 2) ** 2)
         except:
-            QMessageBox.about(self,'Error','make sure you have provided the'\
-            + ' data (AoI, camera parameters etc.) correctly')
+            QMessageBox.about(self, 'Error', 'make sure you have provided the' \
+                              + ' data (AoI, camera parameters etc.) correctly')
             save_error()
         else:
-            #thread for 'altitude for each strip' option
-            if self.rBstripsAltitude.isChecked():
+            # thread for 'altitude for each strip' option
+            if self.rBstripsAltitude.isChecked():  # or self.rBterrainFollowing.isChecked()
                 if self.tabWidgetCorridor:
-                    self.startWorker_altitudeStrip(pc_lay, theta, dist,
-                                                   self.crs_vct, self.DTM, w,
-                                                   s, self.tabWidgetCorridor,
-                                                   line_buf_list, photo_lay)
-                    self.pBaccept.setEnabled(False)
-                    self.pBacceptControl.setEnabled(False)
-                    self.dtmMapLayCombB.setEnabled(False)
-                    self.aoiMapLayCombB.setEnabled(False)
-                    self.corMapLayCombB.setEnabled(False)
-                    self.pBgetHeights.setEnabled(False)
+                    self.startWorker_updateAltitude(pc_lay, theta, dist,
+                                                    self.crs_vct, self.DTM, w,
+                                                    photo_lay, s,
+                                                    self.tabWidgetCorridor,
+                                                    line_buf_list)
                 else:
-                    self.startWorker_altitudeStrip(pc_lay, theta, dist,
-                                                   self.crs_vct, self.DTM, w,
-                                                   s, self.tabWidgetCorridor,
-                                                   self.geom_AoI, photo_lay)
-                    self.pBaccept.setEnabled(False)
-                    self.pBacceptControl.setEnabled(False)
-                    self.dtmMapLayCombB.setEnabled(False)
-                    self.aoiMapLayCombB.setEnabled(False)
-                    self.corMapLayCombB.setEnabled(False)
-                    self.pBgetHeights.setEnabled(False)
-            elif self.rBterrainFollowing.isChecked():
-                #thread for 'terraing following' option
-                self.startWorker_terrainFollowing(pc_lay, theta, dist,
-                                                  self.crs_vct, self.DTM,
-                                                  w, photo_lay)
+                    self.startWorker_updateAltitude(pc_lay, theta, dist,
+                                                    self.crs_vct, self.DTM, w,
+                                                    photo_lay, s,
+                                                    self.tabWidgetCorridor,
+                                                    self.geom_AoI)
                 self.pBaccept.setEnabled(False)
                 self.pBacceptControl.setEnabled(False)
-                self.dtmMapLayCombB.setEnabled(False)
-                self.aoiMapLayCombB.setEnabled(False)
-                self.corMapLayCombB.setEnabled(False)
-                self.pBgetHeights.setEnabled(False)
+
+            elif self.rBterrainFollowing.isChecked():
+                # thread for 'terraing following' option
+                self.startWorker_updateAltitude(pc_lay, theta, dist,
+                                                self.crs_vct, self.DTM,
+                                                w, photo_lay)
+                self.pBaccept.setEnabled(False)
+                self.pBacceptControl.setEnabled(False)
+
             else:
-                #changing layers style, deleting redundant attribute fields
+                # delete redundant fields
                 pc_lay.startEditing()
-                pc_lay.deleteAttributes([8,9,10])
+                pc_lay.deleteAttributes([8, 9, 10])
                 pc_lay.commitChanges()
                 photo_lay.startEditing()
-                photo_lay.deleteAttributes([2,3])
+                photo_lay.deleteAttributes([2, 3])
                 photo_lay.commitChanges()
+
+                # change layers style
                 renderer = photo_lay.renderer()
                 symbol = renderer.symbol()
-                prop = {'color':'200,200,200,30', 'color_border':'#000000',
-                        'width_border':'0.2'}
+                prop = {'color': '200,200,200,30', 'color_border': '#000000',
+                        'width_border': '0.2'}
                 my_symbol = symbol.createSimple(prop)
                 renderer.setSymbol(my_symbol)
                 photo_lay.triggerRepaint()
                 photo_lay.setName('photos')
                 pc_lay.setName('projection centres')
+
+                # add layers to canvas
                 QgsProject.instance().addMapLayer(photo_lay)
                 QgsProject.instance().addMapLayer(pc_lay)
-            
+
     @pyqtSlot()
     def on_pBacceptControl_clicked(self):
+        """Push Button to execute all control activites."""
         try:
+            # read all necessary parameters
             proj_centres = self.pcMapLayCombB.currentLayer()
-            h_field = self.hFieldComboBox.currentField()
+            h_field = self.altitudeFieldComboBox.currentField()
             o_field = self.omegaFieldComboBox.currentField()
             p_field = self.phiFieldComboBox.currentField()
             k_field = self.kappaFieldComboBox.currentField()
-            focal = float(self.lEfocal.text().replace(',','.'))/1000 #[m]
-            size_sensor = float(self.lEsensor.text().replace(',','.'))/1000000 #[m]
+            focal = float(self.lEfocal.text().replace(',', '.')) / 1000  # [m]
+            size_sensor = float(self.lEsensor.text().replace(',', '.')) / 1000000  # [m]
             size_along = int(self.lEalong.text())
             size_across = int(self.lEacross.text())
             threshold = self.dSpinBoxThreshold.value()
-            if not self.crs_rst or not h_field or not o_field or not p_field\
-            or not k_field:
+            if not self.crs_rst or not h_field or not o_field or not p_field \
+                    or not k_field:
                 raise NameError
         except (AttributeError, ValueError, NameError):
-            QMessageBox.about(self,'Error','make sure you have provided the'\
-            + ' data (DTM, projection centers, camera parameters) correctly')
+            QMessageBox.about(self, 'Error', 'Make sure you have provided the'
+                                             ' data (DTM, projection centers,'
+                                             ' camera parameters) correctly')
             save_error()
         else:
+            # start worker to move hard task into a separate thread
             self.startWorker_control(pnt_lay=proj_centres, h=h_field,
-                o=o_field, p=p_field, k=k_field, f=focal,
-                s_sensor=size_sensor, s_along=size_along,
-                s_across=size_across, crs_vct=self.crs_vct_ctrl,
-                crs_rst=self.crs_rst, DTM=self.raster,
-                overlap_bool=self.cBoverlapPict.isChecked(),
-                gsd_bool=self.cBgsdMap.isChecked(),
-                footprint_bool=self.cBfootprint.isChecked(), t=threshold)
+                                     o=o_field, p=p_field, k=k_field, f=focal,
+                                     s_sensor=size_sensor, s_along=size_along,
+                                     s_across=size_across, crs_vct=self.crs_vct_ctrl,
+                                     crs_rst=self.crs_rst, DTM=self.raster,
+                                     overlap_bool=self.cBoverlapPict.isChecked(),
+                                     gsd_bool=self.cBgsdMap.isChecked(),
+                                     footprint_bool=self.cBfootprint.isChecked(),
+                                     t=threshold)
+            # disable GUI elements to prevent thread from starting
+            # a second time
             self.pBacceptControl.setEnabled(False)
             self.pBaccept.setEnabled(False)
-            self.dtmMapLayCombB.setEnabled(False)
-            self.pcMapLayCombB.setEnabled(False)
-            
+
     @pyqtSlot()
     def on_pBaddCamera_clicked(self):
+        """Push Button to add camera to camera list."""
         try:
-            cam_lib_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'cameras_library')
-            name, ext = QFileDialog.getSaveFileName(self,'file',cam_lib_path,
+            # cameras library folder path
+            cam_lib_path = os.path.join(
+                os.path.dirname(os.path.abspath(__file__)), 'cameras_library')
+            name, ext = QFileDialog.getSaveFileName(self, 'file', cam_lib_path,
                                                     'Text files (*.txt)')
-            with open(name,'w') as new_camera:
-                new_camera.write('Focal length: ' + self.lEfocal.text()+'\n')
-                new_camera.write('Sensor size: ' + self.lEsensor.text()+'\n')
-                new_camera.write('Size along: ' + self.lEalong.text()+'\n')
+            with open(name, 'w') as new_camera:
+                new_camera.write('Focal length: ' + self.lEfocal.text() + '\n')
+                new_camera.write('Sensor size: ' + self.lEsensor.text() + '\n')
+                new_camera.write('Size along: ' + self.lEalong.text() + '\n')
                 new_camera.write('Size across: ' + self.lEacross.text())
+            # clear camera and add all cameras again to ComboBox
             self.combBcam.clear()
-            cam_lib_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'cameras_library')
+            cam_lib_path = os.path.join(
+                os.path.dirname(os.path.abspath(__file__)), 'cameras_library')
             cam_list = os.listdir(cam_lib_path)
             self.combBcam.addItems(cam_list)
         except:
-            QMessageBox.about(self,'Error','Saving camera failed')
+            QMessageBox.about(self, 'Error', 'Saving camera failed')
             save_error()
-    
+
     @pyqtSlot()
     def on_pBdelCamera_clicked(self):
+        """Push Button to delete camera from camera list."""
         try:
-            cam_lib_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'cameras_library')
+            # cameras library folder path
+            cam_lib_path = os.path.join(
+                os.path.dirname(os.path.abspath(__file__)), 'cameras_library')
+            # name of camera file from camera ComboBox
             cam_name = self.combBcam.currentText()
+
+            # check if file exist and remove it
             if os.path.isfile(os.path.join(cam_lib_path, cam_name)):
                 os.remove(os.path.join(cam_lib_path, cam_name))
+            # clear camera and add all cameras again to ComboBox
             self.combBcam.clear()
-            cam_lib_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'cameras_library')
+            cam_lib_path = os.path.join(
+                os.path.dirname(os.path.abspath(__file__)), 'cameras_library')
             cam_list = os.listdir(cam_lib_path)
             self.combBcam.addItems(cam_list)
         except:
-            QMessageBox.about(self,'Error','Deleting camera failed')
+            QMessageBox.about(self, 'Error', 'Deleting camera failed')
             save_error()

@@ -7,11 +7,11 @@
     <x>0</x>
     <y>0</y>
     <width>368</width>
-    <height>547</height>
+    <height>551</height>
    </rect>
   </property>
   <property name="windowTitle">
-   <string>Dialog</string>
+   <string>Flight Planner</string>
   </property>
   <layout class="QGridLayout" name="gridLayout_3">
    <property name="leftMargin">
@@ -658,7 +658,7 @@ landform</string>
      <item row="4" column="3" rowspan="2" colspan="4">
       <widget class="QLabel" name="label_36">
        <property name="text">
-        <string>exceeding AoI by multiple of base</string>
+        <string>multiple of base exceed the AoI</string>
        </property>
        <property name="alignment">
         <set>Qt::AlignRight|Qt::AlignTrailing|Qt::AlignVCenter</set>
@@ -668,7 +668,7 @@ landform</string>
      <item row="6" column="3" rowspan="2" colspan="4">
       <widget class="QLabel" name="label_37">
        <property name="text">
-        <string>exceeding AoI by the first and last strip [%]</string>
+        <string>first and last strip exceed AoI [%]</string>
        </property>
        <property name="alignment">
         <set>Qt::AlignRight|Qt::AlignTrailing|Qt::AlignVCenter</set>
@@ -834,7 +834,7 @@ following</string>
            </widget>
           </item>
           <item row="2" column="1" rowspan="2">
-           <widget class="QgsFieldComboBox" name="hFieldComboBox"/>
+           <widget class="QgsFieldComboBox" name="altitudeFieldComboBox"/>
           </item>
           <item row="2" column="2" colspan="2">
            <widget class="QCheckBox" name="cBfootprint">
