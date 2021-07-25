@@ -19,10 +19,9 @@ from math import (
     tan
 )
 
+import matplotlib.path as mpltPath
 import numpy as np
 import scipy.ndimage as ndimage
-from osgeo import gdal, osr
-from pyproj import Transformer, transform
 from PyQt5.QtCore import QVariant
 from qgis.analysis import QgsZonalStatistics
 from qgis.core import (
@@ -40,17 +39,179 @@ from qgis.core import (
 )
 
 
-def ground_edge_points(R, Z, threshold, xy, Xs, Ys, Zs,
-                       ds, f, crs_DTM, crs_pc, transformer):
+def image_corners(size_sensor, size_across, size_along, focal):
+    """Return array of x, y, z coordinates of image corners in image space"""
+
+    x = size_sensor * size_along / 2
+    y = size_sensor * size_across / 2
+    xyf_img_corners = np.array([[-x, y, -focal],
+                                [-x, -y, -focal],
+                                [x, -y, -focal],
+                                [x, y, -focal]
+                               ])
+    return xyf_img_corners
+
+
+def clip_raster(ds, xyf, R, Xs, Ys, Zs, Z_min, trans_v_r, crs_rst, crs_vct):
+    """Return DTM clipped by bounding box of photo. Range of bounding box
+     is derived from photo's Exterior Orientation Parameters, camera parameters
+     and minimum height of DTM"""
+
+    DTM_array = ds.GetRasterBand(1).ReadAsArray()
+    focal = xyf[0, 2]
+    img_corners = np.vstack(([0, 0, focal], xyf))
+
+    X_min = Xs + (Z_min - Zs) * np.divide(np.dot(img_corners, R[0]),
+                                          np.dot(img_corners, R[2]))
+    Y_min = Ys + (Z_min - Zs) * np.divide(np.dot(img_corners, R[1]),
+                                          np.dot(img_corners, R[2]))
+
+    X_pc, Y_pc = X_min[0], Y_min[0]
+    buffer = max(((X_pc - X_min[1:])**2 + (Y_pc - Y_min[1:])**2)**0.5)
+
+    max_range_X = X_pc + buffer
+    min_range_X = X_pc - buffer
+    max_range_Y = Y_pc + buffer
+    min_range_Y = Y_pc - buffer
+    range = np.array([[min_range_X, max_range_Y],
+                      [min_range_X, min_range_Y],
+                      [max_range_X, min_range_Y],
+                      [max_range_X, max_range_Y]
+                      ])
+
+    if crs_vct != crs_rst:
+        X, Y = transf_coord(trans_v_r, range[:, 0], range[:, 1])
+        cols, rows = crs2pixel(ds.GetGeoTransform(), X, Y)
+    else:
+        cols, rows = crs2pixel(ds.GetGeoTransform(), range[:, 0], range[:, 1])
+
+    upper_left_c, upper_left_r = int(min(cols)//1), int(min(rows)//1)
+    bottom_right_c, bottom_right_r = int(max(cols)//1), int(max(rows)//1)
+
+    if upper_left_r < 0:
+        upper_left_r = 0
+    if upper_left_c < 0:
+        upper_left_c = 0
+
+    if bottom_right_r > DTM_array.shape[0]:
+        bottom_right_r = DTM_array.shape[0]
+    if bottom_right_c > DTM_array.shape[1]:
+        bottom_right_c = DTM_array.shape[1]
+
+    x0, y0 = pixel2crs(ds.GetGeoTransform(), upper_left_c, upper_left_r)
+    clipped_DTM = np.array(DTM_array[upper_left_r: bottom_right_r+1,
+                           upper_left_c: bottom_right_c+1])
+    updated_geotransform = list(ds.GetGeoTransform())
+    updated_geotransform[0] = x0
+    updated_geotransform[3] = y0
+
+    return clipped_DTM, updated_geotransform
+
+
+def points_pixel_centroids(geotransform, shape):
+    """Return pixel centroids for the raster."""
+
+    upx = geotransform[0]
+    upy = geotransform[3]
+    xscale = geotransform[1]
+    yscale = geotransform[5]
+    xskew = geotransform[2]
+    yskew = geotransform[4]
+    pc = sqrt(xscale ** 2 + yskew ** 2)
+    pr = sqrt(yscale ** 2 + xskew ** 2)
+    alpha = acos(xscale / pc)
+
+    x_grid = np.arange(0, shape[1]*pc, pc)
+    y_grid = np.arange(0, -shape[0]*pr, -pr)
+    xv, yv = np.meshgrid(x_grid[:shape[1]], y_grid[:shape[0]])
+
+    xx = xv.reshape((-1, 1))
+    yy = yv.reshape((-1, 1))
+
+    x_start = upx + 1 / 2 * pc
+    y_start = upy - 1 / 2 * pr
+    centroid_x = x_start + np.cos(-alpha)*xx + np.sin(-alpha)*yy
+    centroid_y = y_start + -np.sin(-alpha)*xx + np.cos(-alpha)*yy
+
+    return np.hstack((centroid_x, centroid_y))
+
+
+def overlap_photo(footprint_vertices, geotransform, clipped_DTM_shape):
+    """Return logical array of photo's footprint."""
+
+    raster_centroids = points_pixel_centroids(geotransform, clipped_DTM_shape)
+
+    path = mpltPath.Path(footprint_vertices)
+    centroids_inside = path.contains_points(raster_centroids)
+
+    logical_array = centroids_inside.reshape((clipped_DTM_shape[0], -1))
+
+    max_row, max_col = np.argwhere(logical_array > 0).max(axis=0)
+    min_row, min_col = np.argwhere(logical_array > 0).min(axis=0)
+
+    trimed_logical_array = logical_array[min_row:max_row+1, min_col:max_col+1]
+
+    upper_left_x, upper_left_y = pixel2crs(geotransform, min_col, min_row)
+    trimed_geotransform = geotransform[:]
+    trimed_geotransform[0] = upper_left_x
+    trimed_geotransform[3] = upper_left_y
+
+    return trimed_logical_array, trimed_geotransform
+
+
+def gsd(DTM, geotransform, Xs, Ys, Zs, Xs_, Ys_, Zs_, f, size_sensor):
+    """Return GSD array."""
+
+    vect_vertical = np.array([0, 0, -1])
+    vect_camera_axis = [Xs_ - Xs, Ys_ - Ys, Zs_ - Zs]
+    # tilt angle of photo
+    t = angle_between_vectors(vect_vertical, vect_camera_axis)
+    if t == 0:
+        gsd_array = ((Zs - DTM) * size_sensor / f) * 100
+    else:
+        # photo's greatest fall line
+        a, b = line(Ys, Ys_, Xs, Xs_)
+        # line perpendicular to photo's greatest fall line
+        if a != 0:
+            a_l_ = -1 / a
+        else:
+            a_l_ = -1 / 0.000000000000000001
+
+        pxpy = points_pixel_centroids(geotransform, DTM.shape)
+        px = pxpy[:, 0]
+        py = pxpy[:, 1]
+
+        b_l_ = py - a_l_ * px
+        # projection point on photo's greatest fall line
+        ppx, ppy = lines_intersection(a_l_, b_l_, a, b)
+        # vector projection center - projection point
+        Z = DTM
+        vect_S_pp = np.array([ppx - Xs, ppy - Ys, (Z - Zs).flatten()])
+
+        beta = angle_between_vectors(vect_vertical, vect_S_pp)
+
+        direction = angle_between_vectors((vect_camera_axis[0],
+                                           vect_camera_axis[1]),
+                                          (vect_S_pp[0],
+                                           vect_S_pp[1]))
+
+        correct_beta = np.where(direction >= 90, -beta, beta).reshape(Z.shape)
+
+        W = Zs - Z
+        gsd_array = size_sensor * (W/f) * np.cos(np.radians(correct_beta - t)) \
+                          / np.cos(np.radians(correct_beta)) * 100
+    return gsd_array
+
+
+def ground_edge_points(R, Z, threshold, xyf, Xs, Ys, Zs,
+                       Z_DTM, geotransform, crs_DTM, crs_pc, transformer):
     """Return ground coordinates of points representing edges of photo."""
 
-    Z_DTM = ds.GetRasterBand(1).ReadAsArray()
-    xyf = np.append(xy, np.ones((xy.shape[0], 1)) * -f, axis=1)
-    XY = np.zeros(xy.shape)
-    XY_prev = np.ones(xy.shape) * 1000
-    Z = np.ones(xy.shape[0]) * Z
+    XY = np.zeros((xyf.shape[0], 2))
+    XY_prev = np.ones((xyf.shape[0], 2)) * 1000
+    Z = np.ones(xyf.shape[0]) * Z
     counter = 0
-    # interpolating X, Y until given threshold will be reached
+
     while not threshold_reached(XY, XY_prev, threshold):
         XY_prev = np.array(XY)
 
@@ -59,15 +220,12 @@ def ground_edge_points(R, Z, threshold, xy, Xs, Ys, Zs,
         XY = np.column_stack((X, Y))
 
         if crs_DTM == crs_pc:
-            # transformation to pixel coordinates
-            column, row = crs2pixel(ds.GetGeoTransform(), X, Y)
+            column, row = crs2pixel(geotransform, X, Y)
         else:
-            # earlier transformation to DTM CRS
             X_DTM, Y_DTM = transf_coord(transformer, X, Y)
-            column, row = crs2pixel(ds.GetGeoTransform(), X_DTM, Y_DTM)
+            column, row = crs2pixel(geotransform, X_DTM, Y_DTM)
 
         rc_array = np.column_stack((row, column)).T
-        # interpolating heights at X, Y
         Z = ndimage.map_coordinates(Z_DTM, rc_array, output=np.float)
 
         # protection against too long iteration
@@ -104,9 +262,10 @@ def image_edge_points(size_sensor, size_across, size_along, Z, Zs, focal,
     top_edge = np.hstack((x_horizontal, y_horizontal * y_max))
     right_edge = np.hstack((x_vertical * x_max, y_vertical * -1))
     bottom_edge = np.hstack((x_horizontal * -1, y_horizontal * -y_max))
-    all_edges = np.vstack((left_edge, top_edge, right_edge, bottom_edge))
+    xy = np.vstack((left_edge, top_edge, right_edge, bottom_edge))
+    xyf = np.append(xy, np.ones((xy.shape[0], 1)) * -focal, axis=1)
 
-    return all_edges
+    return xyf
 
 
 def threshold_reached(xy, xy_previous, threshold):
@@ -121,19 +280,12 @@ def angle_between_vectors(v1, v2):
     """Return angle between two 2D vectors."""
     v1v2 = np.dot(v1, v2)
     lenv1 = np.linalg.norm(v1)
-    lenv2 = np.linalg.norm(v2)
-    if lenv1 == 0:
-        lenv1 = 0.000000000000000001
-    if lenv2 == 0:
-        lenv2 = 0.000000000000000001
+    lenv2 = np.linalg.norm(v2, axis=0)
     # cosine of angle g between vectors
-    if 1 >= v1v2 / (lenv1 * lenv2) >= -1:
-        g = v1v2 / (lenv1 * lenv2)
-    elif v1v2 / (lenv1 * lenv2) > 1:
-        g = 1
-    elif v1v2 / (lenv1 * lenv2) < -1:
-        g = -1
-    angle = acos(g) * 180 / pi
+    g = np.array(v1v2 / (lenv1 * lenv2))
+    g[g > 1] = 1
+    g[g < -1] = -1
+    angle = np.arccos(g) * 180 / pi
     return angle
 
 
@@ -407,19 +559,36 @@ def update_order(k, first_p, first_s, p_nr, s_nr, pc_layer):
 
 def crs2pixel(geo, x, y):
     """Transform coordinates from CRS to pixel coordinates."""
-    upx = geo[0]  # top left x
-    upy = geo[3]  # top left y
-    resx = geo[1]  # W-E pixel resolution
-    resy = geo[5]  # N-S pixel resolution
-    skewx = geo[2]
-    skewy = geo[4]
-    pc = sqrt(skewx ** 2 + resx ** 2)
-    pr = sqrt(skewy ** 2 + resy ** 2)
-    alpha = acos(resx / pc)
+    upx = geo[0]
+    upy = geo[3]
+    xscale = geo[1]
+    yscale = geo[5]
+    xskew = geo[2]
+    yskew = geo[4]
+    pc = sqrt(xscale ** 2 + yskew ** 2)
+    pr = sqrt(yscale ** 2 + xskew ** 2)
+    alpha = acos(xscale / pc)
     column = (cos(alpha) * (x - upx) + sin(alpha) * (y - upy)) / fabs(pc)
     row = (cos(alpha) * (upy - y) + sin(alpha) * (x - upx)) / fabs(pr)
 
     return column, row
+
+
+def pixel2crs(geo, c, r):
+    """Transform coordinates from pixel to CRS coordinates."""
+    upx = geo[0]
+    upy = geo[3]
+    xscale = geo[1]
+    yscale = geo[5]
+    xskew = geo[2]
+    yskew = geo[4]
+    pc = sqrt(xscale ** 2 + yskew ** 2)
+    pr = sqrt(yscale ** 2 + xskew ** 2)
+    alpha = acos(xscale / pc)
+    x = pc*cos(alpha)*c + pr*sin(alpha)*r + upx
+    y = pc*sin(alpha)*c - pr*cos(alpha)*r + upy
+
+    return x, y
 
 
 def line(ya, yb, xa, xb):
@@ -464,108 +633,6 @@ def transf_coord(transformer, x, y):
     """Transform coordinates between two CRS."""
     x_transformed, y_transformed = transformer.transform(x, y)
     return x_transformed, y_transformed
-
-
-def photo_gsd_overlay(geom_footprint, crs_vect, crs_rst, raster, Xs, Ys, Zs,
-                      Xs_, Ys_, Zs_, f, size_sensor):
-    """Return dataset raster including 2 bands: GSD map and logical sum
-    of overlapping photos."""
-
-    bound_box = geom_footprint.boundingBox()
-    trnsfrm = Transformer.from_crs(crs_vect, crs_rst, always_xy=True)
-    if crs_vect != crs_rst:
-        x_min_bb, y_max_bb = transf_coord(trnsfrm,
-                                          bound_box.xMinimum(),
-                                          bound_box.yMaximum())
-        x_max_bb, y_min_bb = transf_coord(trnsfrm,
-                                          bound_box.xMaximum(),
-                                          bound_box.yMinimum())
-    else:
-        x_min_bb, y_max_bb = bound_box.xMinimum(), bound_box.yMaximum()
-        x_max_bb, y_min_bb = bound_box.xMaximum(), bound_box.yMinimum()
-
-    geo_rst = raster.GetGeoTransform()
-    pxl_width = geo_rst[1]
-    pxl_height = -geo_rst[5]
-    uplx = geo_rst[0]
-    uply = geo_rst[3]
-    # transformation to pixel coordinates
-    col_min, row_min = crs2pixel(geo_rst, x_min_bb, y_max_bb)
-    col_max, row_max = crs2pixel(geo_rst, x_max_bb, y_min_bb)
-    col_min, row_min = int(col_min), int(row_min)
-    col_max, row_max = int(col_max), int(row_max)
-    # output array for logical sum of overlaying photos
-    overlap_array = np.zeros((row_max - row_min, col_max - col_min))
-    gsd_array = np.ones((row_max - row_min, col_max - col_min)) * 1000
-    vect_vertical = [0, 0, -1]
-    vect_camera_axis = [Xs_ - Xs, Ys_ - Ys, Zs_ - Zs]
-    # tilt angle of photo
-    t = angle_between_vectors(vect_vertical, vect_camera_axis)
-    band = raster.GetRasterBand(1)
-    rst_array = band.ReadAsArray()
-    # Get nodata value from the GDAL band object
-    nodata = band.GetNoDataValue()
-    # Create a masked array for making calculations without nodata values
-    rst_array = np.ma.masked_equal(rst_array, nodata)
-    r = 0
-    y_cell = uply - row_min * pxl_height - pxl_height / 2
-    trnsfrm2 = Transformer.from_crs(crs_rst, crs_vect, always_xy=True)
-    for row in rst_array[row_min: row_max]:
-        c = 0
-        x_cell = uplx + col_min * pxl_width + pxl_width / 2
-        for Z in row[col_min: col_max]:
-            px, py = transf_coord(trnsfrm2, x_cell, y_cell)
-            p = QgsGeometry.fromPointXY(QgsPointXY(px, py))
-            if geom_footprint.contains(p):
-                overlap_array[r, c] = 1
-                if t == 0:
-                    gsd_array[r, c] = ((Zs - Z) * size_sensor / f) * 100
-                else:
-                    # photo's greatest fall line
-                    a, b = line(Ys, Ys_, Xs, Xs_)
-                    # line perpendicular to photo's greatest fall line
-                    if a != 0:
-                        a_l_ = -1 / a
-                    else:
-                        a_l_ = -1 / 0.000000000000000001
-                    b_l_ = py - a_l_ * px
-                    # projection point on photo's greatest fall line
-                    ppx, ppy = lines_intersection(a_l_, b_l_, a, b)
-                    # vector projection center - projection point
-                    vect_S_pp = [ppx - Xs, ppy - Ys, Z - Zs]
-                    beta = angle_between_vectors(vect_vertical, vect_S_pp)
-                    direction = angle_between_vectors((vect_camera_axis[0],
-                                                       vect_camera_axis[1]),
-                                                      (vect_S_pp[0],
-                                                       vect_S_pp[1]))
-                    if direction >= 90:
-                        beta = -beta
-                    W = Zs - Z
-                    gsd_array[r, c] = size_sensor * (W / f) * cos(radians(beta - t)) \
-                                      / cos(radians(beta)) * 100
-            c = c + 1
-            x_cell = x_cell + pxl_width
-        r = r + 1
-        y_cell = y_cell - pxl_height
-
-    # saving outputs to raster
-    temp_raster = os.path.join(QgsProcessingUtils.tempFolder(), 'control.tif')
-    driver = gdal.GetDriverByName('GTiff')
-    dataset = driver.Create(temp_raster, xsize=len(row[col_min: col_max]),
-                            ysize=len(rst_array[row_min: row_max]),
-                            bands=2, eType=gdal.GDT_Float32)
-    dataset.GetRasterBand(1).WriteArray(overlap_array)
-    dataset.GetRasterBand(2).WriteArray(gsd_array)
-
-    # setting georeference
-    geot = [uplx + col_min * pxl_width, geo_rst[1], geo_rst[2],
-            uply - row_min * pxl_height, geo_rst[4], geo_rst[5]]
-    dataset.SetGeoTransform(geot)
-    srs = osr.SpatialReference()
-    srs.SetWellKnownGeogCS(crs_rst)
-    dataset.SetProjection(srs.ExportToWkt())
-
-    return dataset
 
 
 def minmaxheight(vector, raster):

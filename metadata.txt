@@ -1,6 +1,6 @@
 [general]
 name=Flight Planner
-qgisMinimumVersion=3.6
+qgisMinimumVersion=3.16
 description=Flight Planner allows you to make a plan of photogrammetric flight. Plugin is equipped in simple tools allowing to asses the flight project (or already done flight).
 version=0.5.4
 author=Jakub Gruca
@@ -14,7 +14,7 @@ repository=https://github.com/JMG30/flight_planner
 hasProcessingProvider=no
 changelog=0.5.4
 	- order of numbering photos in stripes has been changed ("zig-zag")
-	- begins of improving quality of code
+	- faster working
 	
 	0.5.3
     - layout added to GUI

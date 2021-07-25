@@ -1,6 +1,5 @@
 import os
 import traceback
-import time
 from math import (
     ceil,
     cos,
@@ -32,13 +31,16 @@ from qgis.core import (
 
 from .functions import (
     ground_edge_points,
+    image_corners,
     image_edge_points,
     crs2pixel,
     rotation_matrix,
     transf_coord,
-    photo_gsd_overlay,
     minmaxheight,
-    save_error
+    save_error,
+    clip_raster,
+    overlap_photo,
+    gsd
 )
 
 
@@ -84,29 +86,36 @@ class Worker(QObject):
         """Do the main work for control methods."""
         result = []
         try:
-            Z_srtm = self.DTM.GetRasterBand(1).ReadAsArray()
-            uplx_r, xres_r, xskew_r, \
-            uply_r, yskew_r, yres_r = self.DTM.GetGeoTransform()
 
             if self.crs_rst != self.crs_vct:
                 transf_vct_rst = Transformer.from_crs(self.crs_vct,
                                                       self.crs_rst,
                                                       always_xy=True)
-            else:
-                transf_vct_rst = None
-            # calculating metric resolution if crs is geographic
-            if QgsCoordinateReferenceSystem(self.crs_rst).isGeographic():
                 transf_rst_vct = Transformer.from_crs(self.crs_rst,
                                                       self.crs_vct,
                                                       always_xy=True)
+            else:
+                transf_vct_rst = None
+                transf_rst_vct = None
+
+            Z_srtm = self.DTM.GetRasterBand(1).ReadAsArray()
+            nodata = self.DTM.GetRasterBand(1).GetNoDataValue()
+            rst_array = np.ma.masked_equal(Z_srtm, nodata)
+            Z_min = np.nanmin(rst_array)
+
+            uplx_r, xres_r, xskew_r, \
+            uply_r, yskew_r, yres_r = self.DTM.GetGeoTransform()
+
+            # calculating metric resolution if crs is geographic
+            if QgsCoordinateReferenceSystem(self.crs_rst).isGeographic():
                 uplx_r_n = uplx_r + xres_r
                 uply_r_n = uply_r + yres_r
                 uplx_v, uply_v = transf_coord(transf_rst_vct, uplx_r, uply_r)
                 uplx_v_n, uply_v_n = transf_coord(transf_rst_vct, uplx_r_n, uply_r_n)
                 xres_r = fabs(uplx_v_n - uplx_v)
                 yres_r = fabs(uply_v_n - uply_v)
-
             mean_res = (fabs(xres_r) + fabs(yres_r)) / 2
+
             # output footprint layer
             footprint_lay = QgsVectorLayer("Polygon?crs=" + str(self.crs_vct),
                                            "footprint", "memory")
@@ -119,6 +128,9 @@ class Worker(QObject):
             lrx_list = []
             lry_list = []
 
+            xyf_corners = image_corners(self.size_sensor, self.size_across,
+                                        self.size_along, self.f)
+
             feat_count = self.layer.featureCount()
             progress_c = 0
             step = feat_count // 1000
@@ -127,63 +139,85 @@ class Worker(QObject):
                 if self.killed is True:
                     # kill request received, exit loop early
                     break
+
                 Xs = feature.geometry().asPoint().x()
                 Ys = feature.geometry().asPoint().y()
                 Zs = feature.attribute(self.height_f)
                 omega = feature.attribute(self.omega_f)
                 phi = feature.attribute(self.phi_f)
                 kappa = feature.attribute(self.kappa_f)
-                if self.crs_vct != self.crs_rst:
-                    Xs_rast, Ys_rast = transf_coord(transf_vct_rst, Xs, Ys)
-                    c, r = crs2pixel(self.DTM.GetGeoTransform(),
-                                     Xs_rast, Ys_rast)
-                else:
-                    c, r = crs2pixel(self.DTM.GetGeoTransform(), Xs, Ys)
 
                 R = rotation_matrix(omega, phi, kappa)
+                clipped_DTM, clipped_geot = clip_raster(self.DTM, xyf_corners,
+                                                        R, Xs, Ys, Zs, Z_min,
+                                                        transf_vct_rst,
+                                                        self.crs_rst,
+                                                        self.crs_vct)
+
+                if self.crs_vct != self.crs_rst:
+                    Xs_rast, Ys_rast = transf_coord(transf_vct_rst, Xs, Ys)
+                    c, r = crs2pixel(clipped_geot, Xs_rast, Ys_rast)
+                else:
+                    c, r = crs2pixel(clipped_geot, Xs, Ys)
 
                 # getting Z value from DTM under given center projection point
-                Z = ndimage.map_coordinates(Z_srtm, np.array([[r, c]]).T)[0]
+                Z_under_pc = ndimage.map_coordinates(clipped_DTM,
+                                                     np.array([[r, c]]).T)[0]
 
                 # edge points list in image space
-                list_xy = image_edge_points(self.size_sensor, self.size_across,
-                                            self.size_along, Z, Zs, self.f,
-                                            mean_res)
+                xyf = image_edge_points(self.size_sensor, self.size_across,
+                                        self.size_along, Z_under_pc, Zs, self.f,
+                                        mean_res)
 
                 # ground coordinates of photo edge points
-                XY_list = ground_edge_points(R, Z, self.threshold, list_xy, Xs,
-                                             Ys, Zs, self.DTM, self.f, self.crs_rst,
-                                             self.crs_vct, transf_vct_rst)
+                footprint_vertices = ground_edge_points(R, Z_under_pc,
+                                                        self.threshold, xyf, Xs,
+                                                        Ys, Zs, clipped_DTM,
+                                                        clipped_geot,
+                                                        self.crs_rst,
+                                                        self.crs_vct,
+                                                        transf_vct_rst)
 
-                footprint_pnts = []
-                for xy in XY_list:
-                    footprint_pnts.append(QgsPointXY(xy[0], xy[1]))
+                footprint_pnts = [QgsPointXY(XY[0], XY[1]) for XY in footprint_vertices]
                 geom_footprint = QgsGeometry.fromPolygonXY([footprint_pnts])
                 feat_footprint.setGeometry(geom_footprint)
                 provider.addFeatures([feat_footprint])
                 footprint_lay.updateExtents()
+
                 if self.overlap_bool or self.gsd_bool:
-                    projejction_center = np.array([[Xs], [Ys], [Zs]])
+                    if self.crs_vct != self.crs_rst:
+                        X_rast, Y_rast = transf_coord(transf_vct_rst,
+                                                      footprint_vertices[:, 0],
+                                                      footprint_vertices[:, 1])
+                        footprint_vertices = np.hstack((X_rast.reshape((-1, 1)),
+                                                        Y_rast.reshape((-1, 1))))
+
+                    overlap_arr, overlap_geot = overlap_photo(footprint_vertices,
+                                                              clipped_geot,
+                                                              clipped_DTM.shape)
+
+                    deltac = int(fabs(round((clipped_geot[0] - overlap_geot[0]) / overlap_geot[1], 0)))
+                    deltar = int(fabs(round((clipped_geot[3] - overlap_geot[3]) / overlap_geot[5], 0)))
+                    fitted_DTM = clipped_DTM[deltar:overlap_arr.shape[0]+deltar, deltac:overlap_arr.shape[1]+deltac]
+
+                    projection_center = np.array([[Xs], [Ys], [Zs]])
                     img_coords = np.array([[0], [0], [-self.f]])
-                    image_crs = np.add(projejction_center,
+                    image_crs = np.add(projection_center,
                                        np.dot(R, img_coords))
                     X = image_crs[0][0]
                     Y = image_crs[1][0]
                     Z = image_crs[2][0]
-                    # calculating logical sum of overlapping images and GSD map
-                    start = time.time()
-                    dataset = photo_gsd_overlay(geom_footprint, self.crs_vct,
-                                                self.crs_rst, self.DTM, Xs,
-                                                Ys, Zs, X, Y, Z, self.f,
-                                                self.size_sensor)
-                    end = time.time()
-                    print(f"Time: {end - start} seconds")
 
-                    ds_list.append(dataset)
-                    upx, xres, xskew, \
-                    upy, yskew, yres = dataset.GetGeoTransform()
-                    cols = dataset.RasterXSize
-                    rows = dataset.RasterYSize
+                    gsd_array = gsd(fitted_DTM, overlap_geot, Xs, Ys, Zs, X, Y,
+                                    Z, self.f, self.size_sensor)
+
+                    gsd_masked = gsd_array * overlap_arr
+                    gsd_masked = np.where(gsd_masked == 0, 1000, gsd_masked)
+
+                    ds_list.append([gsd_masked, overlap_arr, overlap_geot])
+                    upx, xres, xskew, upy, yskew, yres = overlap_geot
+                    cols = overlap_arr.shape[1]
+                    rows = overlap_arr.shape[0]
                     ulx = upx  # upper left x
                     uly = upy  # upper left y
                     lrx = upx + cols * xres + rows * xskew  # lower right x
@@ -192,7 +226,7 @@ class Worker(QObject):
                     uly_list.append(uly)
                     lrx_list.append(lrx)
                     lry_list.append(lry)
-                # increment progress
+
                 progress_c += 1
                 if step == 0 or progress_c % step == 0:
                     self.progress.emit(progress_c / float(feat_count) * 100)
@@ -212,26 +246,16 @@ class Worker(QObject):
                 progress_c = 0
                 step = ds_count // 1000
                 # combining the results of all photos
-                for ds in ds_list:
-                    c, r = crs2pixel(geo, ds.GetGeoTransform()[0] + xres / 2,
-                                     ds.GetGeoTransform()[3] + yres / 2)
+                for gsd_array, overlay_array, geot in ds_list:
+                    c, r = crs2pixel(geo, geot[0] + xres / 2,
+                                     geot[3] + yres / 2)
                     c = int(c)
                     r = int(r)
-                    rows, cols = ds.RasterYSize, ds.RasterXSize
-                    overlay_array = ds.GetRasterBand(1).ReadAsArray()
-                    gsd_array = ds.GetRasterBand(2).ReadAsArray()
-                    i = 0
-                    for w in final_overlay[:]:
-                        j = 0
-                        for k in w[:]:
-                            if r <= i < r + rows and c <= j < c + cols:
-                                final_overlay[i, j] = final_overlay[i, j] \
-                                                      + overlay_array[i - r, j - c]
-                                final_gsd[i, j] = min(final_gsd[i, j],
-                                                      gsd_array[i - r, j - c])
-                            j = j + 1
-                        i = i + 1
-                    # increment progress
+                    rows, cols = overlay_array.shape[0], overlay_array.shape[1]
+
+                    final_overlay[r:r+rows, c:c+cols] = final_overlay[r:r+rows, c:c+cols] + overlay_array
+                    final_gsd[r:r+rows, c:c+cols] = np.where(gsd_array < final_gsd[r:r+rows, c:c+cols], gsd_array, final_gsd[r:r+rows, c:c+cols])
+
                     progress_c += 1
                     if step == 0 or progress_c % step == 0:
                         self.progress.emit(progress_c / float(ds_count) * 100)
@@ -243,7 +267,7 @@ class Worker(QObject):
                                            ysize=rows_fp, bands=1,
                                            eType=gdal.GDT_Float32)
                 ds_gsd = driver.Create(temp_gsd, xsize=cols_fp, ysize=rows_fp,
-                                       bands=1, eType=gdal.GDT_Float32)
+                                     bands=1, eType=gdal.GDT_Float32)
                 ds_overlay.GetRasterBand(1).WriteArray(final_overlay)
                 ds_overlay.GetRasterBand(1).SetNoDataValue(0)
                 ds_gsd.GetRasterBand(1).WriteArray(final_gsd)
@@ -322,6 +346,7 @@ class Worker(QObject):
             save_error()
         self.finished.emit(result)
         self.enabled.emit(True)
+
 
     def run_followingTerrain(self):
         result = []
