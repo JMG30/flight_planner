@@ -1,4 +1,0 @@
-Focal length: 100
-Sensor size: 7.2
-Size along: 9420
-Size across: 14430

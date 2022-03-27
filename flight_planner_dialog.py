@@ -22,12 +22,13 @@
  ***************************************************************************/
 """
 import os
+import json
 from math import sqrt, ceil, fabs, pi, atan2, atan
 
 import processing
 from osgeo import gdal
 from pyproj import Transformer
-from PyQt5.QtWidgets import QFileDialog, QMessageBox
+from PyQt5.QtWidgets import QMessageBox, QInputDialog
 from PyQt5.QtCore import pyqtSlot, QVariant, QThread
 from qgis.PyQt import uic, QtWidgets
 from qgis.core import (
@@ -38,6 +39,7 @@ from qgis.core import (
     QgsProject
 )
 
+from .camera import Camera
 from .worker import Worker
 from .functions import (
     bounding_box_at_angle,
@@ -73,10 +75,11 @@ class FlightPlannerDialog(QtWidgets.QDialog, FORM_CLASS):
         self.corMapLayCombB.setFilters(QgsMapLayerProxyModel.LineLayer)
 
         # Set up ComboBox of camera
-        self.cam_lib_path = os.path.join(
-            os.path.dirname(os.path.abspath(__file__)), 'cameras_library')
-        self.cameras_list = os.listdir(self.cam_lib_path)
-        self.combBcam.addItems(self.cameras_list)
+        self.cameras_file = os.path.join(
+            os.path.dirname(os.path.abspath(__file__)), 'cameras.json')
+        with open(self.cameras_file, 'r', encoding='utf-8') as file:
+            self.cameras = [Camera(**camera) for camera in json.load(file)]
+            self.combBcam.addItems([camera.name for camera in self.cameras])
         self.combBcam.setItemText(0, 'Select camera or type parameters')
 
     def startWorker_control(self, pnt_lay, h, o, p, k, f, s_sensor, s_along,
@@ -172,23 +175,18 @@ class FlightPlannerDialog(QtWidgets.QDialog, FORM_CLASS):
         pass
 
     def on_combBcam_highlighted(self):
+        camera_names = [camera.name for camera in self.cameras]
         if self.combBcam.currentText() == 'Select camera or type parameters':
             self.combBcam.removeItem(self.combBcam.currentIndex())
             self.combBcam.insertItem(self.combBcam.currentIndex(),
-                                     self.cameras_list[self.combBcam.currentIndex()])
+                                     camera_names[self.combBcam.currentIndex()])
 
-    def on_combBcam_activated(self, camera_name):
-        if isinstance(camera_name, str):
-            dict = {}
-            with open(os.path.join(
-                    self.cam_lib_path, str(camera_name))) as camera:
-                for line in camera:
-                    (key, val) = line.split(':')
-                    dict[key] = val
-                self.lEfocal.setText(dict['Focal length'].rstrip())
-                self.lEsensor.setText(dict['Sensor size'].rstrip())
-                self.lEalong.setText(dict['Size along'].rstrip())
-                self.lEacross.setText(dict['Size across'].rstrip())
+    def on_combBcam_activated(self, i):
+        if isinstance(i, int):
+            self.lEfocal.setText(self.cameras[i].focal_length)
+            self.lEsensor.setText(self.cameras[i].sensor_size)
+            self.lEalong.setText(self.cameras[i].pixels_along_track)
+            self.lEacross.setText(self.cameras[i].pixels_across_track)
 
     def on_lEfocal_textChanged(self):
         pass
@@ -618,22 +616,18 @@ class FlightPlannerDialog(QtWidgets.QDialog, FORM_CLASS):
     def on_pBaddCamera_clicked(self):
         """Push Button to add camera to camera list."""
         try:
-            # cameras library folder path
-            cam_lib_path = os.path.join(
-                os.path.dirname(os.path.abspath(__file__)), 'cameras_library')
-            name, ext = QFileDialog.getSaveFileName(self, 'file', cam_lib_path,
-                                                    'Text files (*.txt)')
-            with open(name, 'w') as new_camera:
-                new_camera.write('Focal length: ' + self.lEfocal.text() + '\n')
-                new_camera.write('Sensor size: ' + self.lEsensor.text() + '\n')
-                new_camera.write('Size along: ' + self.lEalong.text() + '\n')
-                new_camera.write('Size across: ' + self.lEacross.text())
-            # clear camera and add all cameras again to ComboBox
-            self.combBcam.clear()
-            cam_lib_path = os.path.join(
-                os.path.dirname(os.path.abspath(__file__)), 'cameras_library')
-            cam_list = os.listdir(cam_lib_path)
-            self.combBcam.addItems(cam_list)
+            camera_name, pressed_ok = QInputDialog.getText(self, 'Save camera',
+                                                        'Enter camera name:')
+            if pressed_ok:
+                new_camera = Camera(camera_name,
+                                    self.lEfocal.text(),
+                                    self.lEsensor.text(),
+                                    self.lEalong.text(),
+                                    self.lEacross.text())
+                new_camera.save()
+                self.cameras.append(new_camera)
+                self.combBcam.addItem(new_camera.name)
+                self.combBcam.setCurrentText(self.cameras[-1].name)
         except:
             QMessageBox.about(self, 'Error', 'Saving camera failed')
             save_error()
@@ -642,21 +636,27 @@ class FlightPlannerDialog(QtWidgets.QDialog, FORM_CLASS):
     def on_pBdelCamera_clicked(self):
         """Push Button to delete camera from camera list."""
         try:
-            # cameras library folder path
-            cam_lib_path = os.path.join(
-                os.path.dirname(os.path.abspath(__file__)), 'cameras_library')
-            # name of camera file from camera ComboBox
-            cam_name = self.combBcam.currentText()
+            camera_names = [camera.name for camera in self.cameras]
+            option, pressed = QInputDialog.getItem(None, "Delete camera",
+                                            "Select camera to delete:",
+                                            camera_names, 0, False)
+            if pressed:
+                selected_camera = next(camera for camera in self.cameras if camera.name == option)
+                selected_camera.delete()
+                self.cameras.remove(selected_camera)
+                selected_camera_index = self.combBcam.findText(selected_camera.name)
+                self.combBcam.removeItem(selected_camera_index)
 
-            # check if file exist and remove it
-            if os.path.isfile(os.path.join(cam_lib_path, cam_name)):
-                os.remove(os.path.join(cam_lib_path, cam_name))
-            # clear camera and add all cameras again to ComboBox
-            self.combBcam.clear()
-            cam_lib_path = os.path.join(
-                os.path.dirname(os.path.abspath(__file__)), 'cameras_library')
-            cam_list = os.listdir(cam_lib_path)
-            self.combBcam.addItems(cam_list)
+                if self.combBcam.currentText():
+                    self.lEfocal.setText(self.cameras[self.combBcam.currentIndex()].focal_length)
+                    self.lEsensor.setText(self.cameras[self.combBcam.currentIndex()].sensor_size)
+                    self.lEalong.setText(self.cameras[self.combBcam.currentIndex()].pixels_along_track)
+                    self.lEacross.setText(self.cameras[self.combBcam.currentIndex()].pixels_across_track)
+                else:
+                    self.lEfocal.setText('')
+                    self.lEsensor.setText('')
+                    self.lEalong.setText('')
+                    self.lEacross.setText('')
         except:
             QMessageBox.about(self, 'Error', 'Deleting camera failed')
             save_error()
