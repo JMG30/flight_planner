@@ -330,19 +330,6 @@
        </property>
       </widget>
      </item>
-     <item row="1" column="3">
-      <widget class="QLineEdit" name="lEfocal">
-       <property name="sizePolicy">
-        <sizepolicy hsizetype="Maximum" vsizetype="Fixed">
-         <horstretch>0</horstretch>
-         <verstretch>0</verstretch>
-        </sizepolicy>
-       </property>
-       <property name="text">
-        <string/>
-       </property>
-      </widget>
-     </item>
      <item row="2" column="0" colspan="3">
       <widget class="QLabel" name="label_30">
        <property name="text">
@@ -350,19 +337,6 @@
        </property>
        <property name="alignment">
         <set>Qt::AlignRight|Qt::AlignTrailing|Qt::AlignVCenter</set>
-       </property>
-      </widget>
-     </item>
-     <item row="2" column="3">
-      <widget class="QLineEdit" name="lEsensor">
-       <property name="sizePolicy">
-        <sizepolicy hsizetype="Maximum" vsizetype="Fixed">
-         <horstretch>0</horstretch>
-         <verstretch>0</verstretch>
-        </sizepolicy>
-       </property>
-       <property name="text">
-        <string/>
        </property>
       </widget>
      </item>
@@ -376,19 +350,6 @@
        </property>
       </widget>
      </item>
-     <item row="3" column="3">
-      <widget class="QLineEdit" name="lEalong">
-       <property name="sizePolicy">
-        <sizepolicy hsizetype="Maximum" vsizetype="Fixed">
-         <horstretch>0</horstretch>
-         <verstretch>0</verstretch>
-        </sizepolicy>
-       </property>
-       <property name="text">
-        <string/>
-       </property>
-      </widget>
-     </item>
      <item row="4" column="0" colspan="3">
       <widget class="QLabel" name="label_26">
        <property name="text">
@@ -399,19 +360,6 @@
        </property>
       </widget>
      </item>
-     <item row="4" column="3">
-      <widget class="QLineEdit" name="lEacross">
-       <property name="sizePolicy">
-        <sizepolicy hsizetype="Maximum" vsizetype="Fixed">
-         <horstretch>0</horstretch>
-         <verstretch>0</verstretch>
-        </sizepolicy>
-       </property>
-       <property name="text">
-        <string/>
-       </property>
-      </widget>
-     </item>
      <item row="6" column="1" colspan="2">
       <widget class="QLabel" name="label_24">
        <property name="text">
@@ -419,22 +367,6 @@
        </property>
        <property name="alignment">
         <set>Qt::AlignRight|Qt::AlignTrailing|Qt::AlignVCenter</set>
-       </property>
-      </widget>
-     </item>
-     <item row="6" column="3">
-      <widget class="QLineEdit" name="lEgsd">
-       <property name="sizePolicy">
-        <sizepolicy hsizetype="Maximum" vsizetype="Fixed">
-         <horstretch>0</horstretch>
-         <verstretch>0</verstretch>
-        </sizepolicy>
-       </property>
-       <property name="text">
-        <string/>
-       </property>
-       <property name="maxLength">
-        <number>5</number>
        </property>
       </widget>
      </item>
@@ -461,6 +393,77 @@
        </property>
        <property name="text">
         <string>Delete camera</string>
+       </property>
+      </widget>
+     </item>
+     <item row="1" column="3">
+      <widget class="QDoubleSpinBox" name="doubleSpinBoxFocalLength">
+       <property name="alignment">
+        <set>Qt::AlignRight|Qt::AlignTrailing|Qt::AlignVCenter</set>
+       </property>
+       <property name="suffix">
+        <string/>
+       </property>
+       <property name="decimals">
+        <number>2</number>
+       </property>
+       <property name="minimum">
+        <double>0.010000000000000</double>
+       </property>
+       <property name="maximum">
+        <double>10000.000000000000000</double>
+       </property>
+      </widget>
+     </item>
+     <item row="2" column="3">
+      <widget class="QDoubleSpinBox" name="doubleSpinBoxSensorSize">
+       <property name="alignment">
+        <set>Qt::AlignRight|Qt::AlignTrailing|Qt::AlignVCenter</set>
+       </property>
+       <property name="minimum">
+        <double>0.010000000000000</double>
+       </property>
+       <property name="maximum">
+        <double>1000.000000000000000</double>
+       </property>
+      </widget>
+     </item>
+     <item row="3" column="3">
+      <widget class="QSpinBox" name="spinBoxPixelsAlongTrack">
+       <property name="alignment">
+        <set>Qt::AlignRight|Qt::AlignTrailing|Qt::AlignVCenter</set>
+       </property>
+       <property name="minimum">
+        <number>1</number>
+       </property>
+       <property name="maximum">
+        <number>9999999</number>
+       </property>
+      </widget>
+     </item>
+     <item row="4" column="3">
+      <widget class="QSpinBox" name="spinBoxPixelsAcrossTrack">
+       <property name="alignment">
+        <set>Qt::AlignRight|Qt::AlignTrailing|Qt::AlignVCenter</set>
+       </property>
+       <property name="minimum">
+        <number>1</number>
+       </property>
+       <property name="maximum">
+        <number>9999999</number>
+       </property>
+      </widget>
+     </item>
+     <item row="6" column="3">
+      <widget class="QDoubleSpinBox" name="doubleSpinBoxGSD">
+       <property name="alignment">
+        <set>Qt::AlignRight|Qt::AlignTrailing|Qt::AlignVCenter</set>
+       </property>
+       <property name="minimum">
+        <double>0.010000000000000</double>
+       </property>
+       <property name="maximum">
+        <double>999.990000000000009</double>
        </property>
       </widget>
      </item>
@@ -500,22 +503,6 @@ landform</string>
        </property>
       </widget>
      </item>
-     <item row="0" column="7">
-      <widget class="QLineEdit" name="lEp">
-       <property name="sizePolicy">
-        <sizepolicy hsizetype="Maximum" vsizetype="Fixed">
-         <horstretch>0</horstretch>
-         <verstretch>0</verstretch>
-        </sizepolicy>
-       </property>
-       <property name="text">
-        <string>60</string>
-       </property>
-       <property name="maxLength">
-        <number>5</number>
-       </property>
-      </widget>
-     </item>
      <item row="1" column="6">
       <widget class="QLabel" name="label_27">
        <property name="layoutDirection">
@@ -526,22 +513,6 @@ landform</string>
        </property>
        <property name="alignment">
         <set>Qt::AlignRight|Qt::AlignTrailing|Qt::AlignVCenter</set>
-       </property>
-      </widget>
-     </item>
-     <item row="1" column="7">
-      <widget class="QLineEdit" name="lEq">
-       <property name="sizePolicy">
-        <sizepolicy hsizetype="Maximum" vsizetype="Fixed">
-         <horstretch>0</horstretch>
-         <verstretch>0</verstretch>
-        </sizepolicy>
-       </property>
-       <property name="text">
-        <string>30</string>
-       </property>
-       <property name="maxLength">
-        <number>5</number>
        </property>
       </widget>
      </item>
@@ -565,22 +536,6 @@ landform</string>
        </property>
       </widget>
      </item>
-     <item row="2" column="7">
-      <widget class="QLineEdit" name="lEminH">
-       <property name="sizePolicy">
-        <sizepolicy hsizetype="Maximum" vsizetype="Fixed">
-         <horstretch>0</horstretch>
-         <verstretch>0</verstretch>
-        </sizepolicy>
-       </property>
-       <property name="text">
-        <string>0</string>
-       </property>
-       <property name="maxLength">
-        <number>8</number>
-       </property>
-      </widget>
-     </item>
      <item row="3" column="3" colspan="2">
       <widget class="QPushButton" name="pBgetHeights">
        <property name="enabled">
@@ -598,22 +553,6 @@ landform</string>
        </property>
        <property name="alignment">
         <set>Qt::AlignRight|Qt::AlignTrailing|Qt::AlignVCenter</set>
-       </property>
-      </widget>
-     </item>
-     <item row="3" column="7">
-      <widget class="QLineEdit" name="lEmaxH">
-       <property name="sizePolicy">
-        <sizepolicy hsizetype="Maximum" vsizetype="Fixed">
-         <horstretch>0</horstretch>
-         <verstretch>0</verstretch>
-        </sizepolicy>
-       </property>
-       <property name="text">
-        <string>100</string>
-       </property>
-       <property name="maxLength">
-        <number>8</number>
        </property>
       </widget>
      </item>
@@ -737,6 +676,58 @@ following</string>
        </property>
        <property name="insertPolicy">
         <enum>QComboBox::NoInsert</enum>
+       </property>
+      </widget>
+     </item>
+     <item row="0" column="7">
+      <widget class="QDoubleSpinBox" name="doubleSpinBoxOverlap">
+       <property name="alignment">
+        <set>Qt::AlignRight|Qt::AlignTrailing|Qt::AlignVCenter</set>
+       </property>
+       <property name="value">
+        <double>60.000000000000000</double>
+       </property>
+      </widget>
+     </item>
+     <item row="1" column="7">
+      <widget class="QDoubleSpinBox" name="doubleSpinBoxSidelap">
+       <property name="alignment">
+        <set>Qt::AlignRight|Qt::AlignTrailing|Qt::AlignVCenter</set>
+       </property>
+       <property name="value">
+        <double>30.000000000000000</double>
+       </property>
+      </widget>
+     </item>
+     <item row="2" column="7">
+      <widget class="QDoubleSpinBox" name="doubleSpinBoxMinHeight">
+       <property name="alignment">
+        <set>Qt::AlignRight|Qt::AlignTrailing|Qt::AlignVCenter</set>
+       </property>
+       <property name="decimals">
+        <number>1</number>
+       </property>
+       <property name="minimum">
+        <double>-999.899999999999977</double>
+       </property>
+       <property name="maximum">
+        <double>100000.000000000000000</double>
+       </property>
+      </widget>
+     </item>
+     <item row="3" column="7">
+      <widget class="QDoubleSpinBox" name="doubleSpinBoxMaxHeight">
+       <property name="alignment">
+        <set>Qt::AlignRight|Qt::AlignTrailing|Qt::AlignVCenter</set>
+       </property>
+       <property name="decimals">
+        <number>1</number>
+       </property>
+       <property name="minimum">
+        <double>-999.899999999999977</double>
+       </property>
+       <property name="maximum">
+        <double>100000.000000000000000</double>
        </property>
       </widget>
      </item>

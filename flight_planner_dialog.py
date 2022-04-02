@@ -80,7 +80,11 @@ class FlightPlannerDialog(QtWidgets.QDialog, FORM_CLASS):
         with open(self.cameras_file, 'r', encoding='utf-8') as file:
             self.cameras = [Camera(**camera) for camera in json.load(file)]
             self.combBcam.addItems([camera.name for camera in self.cameras])
-        self.combBcam.setItemText(0, 'Select camera or type parameters')
+        if self.combBcam.count() > 0:
+            self.combBcam.setItemText(0, 'Select camera or set parameters')
+        else:
+            self.combBcam.addItem('No cameras listed')
+            self.combBcam.setCurrentText('No cameras listed')
 
     def startWorker_control(self, pnt_lay, h, o, p, k, f, s_sensor, s_along,
                             s_across, crs_vct, crs_rst, DTM, overlap_bool,
@@ -176,43 +180,47 @@ class FlightPlannerDialog(QtWidgets.QDialog, FORM_CLASS):
 
     def on_combBcam_highlighted(self):
         camera_names = [camera.name for camera in self.cameras]
-        if self.combBcam.currentText() == 'Select camera or type parameters':
-            self.combBcam.removeItem(self.combBcam.currentIndex())
-            self.combBcam.insertItem(self.combBcam.currentIndex(),
-                                     camera_names[self.combBcam.currentIndex()])
+        items_list = [self.combBcam.itemText(i) for i in range(self.combBcam.count())]
+        if ("Select camera or set parameters" in items_list or "No cameras listed" in items_list) and camera_names:
+            self.combBcam.clear()
+            self.combBcam.addItems(camera_names)
+        elif ("Select camera or set parameters" in items_list) and not camera_names:
+            self.combBcam.clear()
+            self.combBcam.addItem("No cameras listed")
 
     def on_combBcam_activated(self, i):
-        if isinstance(i, int):
-            self.lEfocal.setText(self.cameras[i].focal_length)
-            self.lEsensor.setText(self.cameras[i].sensor_size)
-            self.lEalong.setText(self.cameras[i].pixels_along_track)
-            self.lEacross.setText(self.cameras[i].pixels_across_track)
+        camera_names = [camera.name for camera in self.cameras]
+        if isinstance(i, int) and self.combBcam.currentText() in camera_names:
+            self.doubleSpinBoxFocalLength.setValue(self.cameras[i].focal_length)
+            self.doubleSpinBoxSensorSize.setValue(self.cameras[i].sensor_size)
+            self.spinBoxPixelsAlongTrack.setValue(self.cameras[i].pixels_along_track)
+            self.spinBoxPixelsAcrossTrack.setValue(self.cameras[i].pixels_across_track)
 
-    def on_lEfocal_textChanged(self):
+    def on_doubleSpinBoxFocalLength_valueChanged(self):
         pass
 
-    def on_lEgsd_textChanged(self):
+    def on_doubleSpinBoxGSD_valueChanged(self):
         pass
 
-    def on_lEsensor_textChanged(self):
+    def on_doubleSpinBoxSensorSize_valueChanged(self):
         pass
 
-    def on_lEalong_textChanged(self):
+    def on_spinBoxPixelsAlongTrack_valueChanged(self):
         pass
 
-    def on_lEacross_textChanged(self):
+    def on_spinBoxPixelsAcrossTrack_valueChanged(self):
         pass
 
-    def on_lEmaxH_textChanged(self):
+    def on_doubleSpinBoxMaxHeight_valueChanged(self):
         pass
 
-    def on_lEminH_textChanged(self):
+    def on_doubleSpinBoxMinHeight_valueChanged(self):
         pass
 
-    def on_lEp_textChanged(self):
+    def on_doubleSpinBoxOverlap_valueChanged(self):
         pass
 
-    def on_lEq_textChanged(self):
+    def on_doubleSpinBoxSidelap_valueChanged(self):
         pass
 
     def on_dSpinBoxBuffer_valueChanged(self):
@@ -248,29 +256,29 @@ class FlightPlannerDialog(QtWidgets.QDialog, FORM_CLASS):
 
     def on_cBincreaseOverlap_stateChanged(self):
         try:
-            focal = float(self.lEfocal.text().replace(',', '.'))
-            gsd = float(self.lEgsd.text().replace(',', '.'))
-            sensor = float(self.lEsensor.text().replace(',', '.'))
-            max_h = float(self.lEmaxH.text().replace(',', '.'))
-            min_h = float(self.lEminH.text().replace(',', '.'))
-            p0 = float(self.lEp.text().replace(',', '.'))
-            q0 = float(self.lEq.text().replace(',', '.'))
+            focal = self.doubleSpinBoxFocalLength.value()
+            gsd = self.doubleSpinBoxGSD.value()
+            sensor = self.doubleSpinBoxSensorSize.value()
+            max_h = self.doubleSpinBoxMaxHeight.value()
+            min_h = self.doubleSpinBoxMinHeight.value()
+            p0 = self.doubleSpinBoxOverlap.value()
+            q0 = self.doubleSpinBoxSidelap.value()
             W = ((gsd * 10) / (sensor / 1000) * focal) / 1000
             if self.cBincreaseOverlap.isChecked():
                 # remember old values of overlap p, sidelap q
-                self.p0_prev = float(self.lEp.text().replace(',', '.'))
-                self.q0_prev = float(self.lEq.text().replace(',', '.'))
+                self.p0_prev = self.doubleSpinBoxOverlap.value()
+                self.q0_prev = self.doubleSpinBoxSidelap.value()
                 # new values of overlap p, sidelap q
                 self.p = p0 / 100 + 0.5 * ((max_h - min_h) / 2) / W
                 self.q = q0 / 100 + 0.7 * ((max_h - min_h) / 2) / W
             else:
                 self.p = self.p0_prev / 100
                 self.q = self.q0_prev / 100
-        except ValueError:
-            QMessageBox.about(self, 'Error', 'Type float numbers')
+        except:
+            QMessageBox.about(self, 'Error', 'Overlap/sidelap increasing failed')
         else:
-            self.lEp.setText(str(round(self.p * 100, 1)))
-            self.lEq.setText(str(round(self.q * 100, 1)))
+            self.doubleSpinBoxOverlap.setValue(self.p * 100)
+            self.doubleSpinBoxSidelap.setValue(self.q * 100)
 
     def on_sBmultipleBase(self):
         pass
@@ -346,8 +354,8 @@ class FlightPlannerDialog(QtWidgets.QDialog, FORM_CLASS):
             QMessageBox.about(self, 'Error', 'Get heights from DTM failed')
             save_error()
         else:
-            self.lEminH.setText(str(h_min))
-            self.lEmaxH.setText(str(h_max))
+            self.doubleSpinBoxMinHeight.setValue(h_min)
+            self.doubleSpinBoxMaxHeight.setValue(h_max)
 
     def on_corMapLayCombB_layerChanged(self):
         self.CorLine = self.corMapLayCombB.currentLayer()
@@ -410,15 +418,15 @@ class FlightPlannerDialog(QtWidgets.QDialog, FORM_CLASS):
     def on_pBaccept_clicked(self):
         """Push Button to make a flight plan."""
         try:
-            focal = float(self.lEfocal.text().replace(',', '.'))
-            gsd = float(self.lEgsd.text().replace(',', '.'))
-            sensor = float(self.lEsensor.text().replace(',', '.'))
-            along = int(self.lEalong.text())
-            across = int(self.lEacross.text())
-            max_h = float(self.lEmaxH.text().replace(',', '.'))
-            min_h = float(self.lEminH.text().replace(',', '.'))
-            p0 = float(self.lEp.text().replace(',', '.'))
-            q0 = float(self.lEq.text().replace(',', '.'))
+            focal = self.doubleSpinBoxFocalLength.value()
+            gsd = self.doubleSpinBoxGSD.value()
+            sensor = self.doubleSpinBoxSensorSize.value()
+            along = self.spinBoxPixelsAlongTrack.value()
+            across = self.spinBoxPixelsAcrossTrack.value()
+            max_h = self.doubleSpinBoxMaxHeight.value()
+            min_h = self.doubleSpinBoxMinHeight.value()
+            p0 = self.doubleSpinBoxOverlap.value()
+            q0 = self.doubleSpinBoxSidelap.value()
             mult_base = self.sBmultipleBase.value()
             x_percent = self.sBexceedingExtremeStrips.value()
 
@@ -583,10 +591,10 @@ class FlightPlannerDialog(QtWidgets.QDialog, FORM_CLASS):
             o_field = self.omegaFieldComboBox.currentField()
             p_field = self.phiFieldComboBox.currentField()
             k_field = self.kappaFieldComboBox.currentField()
-            focal = float(self.lEfocal.text().replace(',', '.')) / 1000  # [m]
-            size_sensor = float(self.lEsensor.text().replace(',', '.')) / 1000000  # [m]
-            size_along = int(self.lEalong.text())
-            size_across = int(self.lEacross.text())
+            focal = self.doubleSpinBoxFocalLength.value() / 1000  # [m]
+            size_sensor = self.doubleSpinBoxSensorSize.value() / 1000000  # [m]
+            size_along = self.spinBoxPixelsAlongTrack.value()
+            size_across = self.spinBoxPixelsAcrossTrack.value()
             threshold = self.dSpinBoxThreshold.value()
             if not self.crs_rst or not h_field or not o_field or not p_field \
                     or not k_field:
@@ -620,10 +628,10 @@ class FlightPlannerDialog(QtWidgets.QDialog, FORM_CLASS):
                                                         'Enter camera name:')
             if pressed_ok:
                 new_camera = Camera(camera_name,
-                                    self.lEfocal.text(),
-                                    self.lEsensor.text(),
-                                    self.lEalong.text(),
-                                    self.lEacross.text())
+                                    self.doubleSpinBoxFocalLength.value(),
+                                    self.doubleSpinBoxSensorSize.value(),
+                                    self.spinBoxPixelsAlongTrack.value(),
+                                    self.spinBoxPixelsAcrossTrack.value())
                 new_camera.save()
                 self.cameras.append(new_camera)
                 self.combBcam.addItem(new_camera.name)
@@ -647,16 +655,17 @@ class FlightPlannerDialog(QtWidgets.QDialog, FORM_CLASS):
                 selected_camera_index = self.combBcam.findText(selected_camera.name)
                 self.combBcam.removeItem(selected_camera_index)
 
-                if self.combBcam.currentText():
-                    self.lEfocal.setText(self.cameras[self.combBcam.currentIndex()].focal_length)
-                    self.lEsensor.setText(self.cameras[self.combBcam.currentIndex()].sensor_size)
-                    self.lEalong.setText(self.cameras[self.combBcam.currentIndex()].pixels_along_track)
-                    self.lEacross.setText(self.cameras[self.combBcam.currentIndex()].pixels_across_track)
+                if self.combBcam.currentText() in camera_names:
+                    self.doubleSpinBoxFocalLength.setValue(self.cameras[self.combBcam.currentIndex()].focal_length)
+                    self.doubleSpinBoxSensorSize.setValue(self.cameras[self.combBcam.currentIndex()].sensor_size)
+                    self.spinBoxPixelsAlongTrack.setValue(self.cameras[self.combBcam.currentIndex()].pixels_along_track)
+                    self.spinBoxPixelsAcrossTrack.setValue(self.cameras[self.combBcam.currentIndex()].pixels_across_track)
                 else:
-                    self.lEfocal.setText('')
-                    self.lEsensor.setText('')
-                    self.lEalong.setText('')
-                    self.lEacross.setText('')
+                    self.doubleSpinBoxFocalLength.setValue(self.doubleSpinBoxFocalLength.minimum())
+                    self.doubleSpinBoxSensorSize.setValue(self.doubleSpinBoxSensorSize.minimum())
+                    self.spinBoxPixelsAlongTrack.setValue(self.spinBoxPixelsAlongTrack.minimum())
+                    self.spinBoxPixelsAcrossTrack.setValue(self.spinBoxPixelsAcrossTrack.minimum())
+                    self.combBcam.addItem('No cameras listed')
         except:
             QMessageBox.about(self, 'Error', 'Deleting camera failed')
             save_error()
