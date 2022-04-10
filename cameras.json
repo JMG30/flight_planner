@@ -1,85 +1,85 @@
 [
     {
         "name": "DMC II 140",
-        "focal_length": 92,
-        "sensor_size": 7.2,
+        "focal_length": 0.092,
+        "sensor_size": 0.0000072,
         "pixels_along_track": 11200,
         "pixels_across_track": 12096
     },
     {
         "name": "DMC II 230",
-        "focal_length": 92,
-        "sensor_size": 5.6,
+        "focal_length": 0.092,
+        "sensor_size": 0.0000056,
         "pixels_along_track": 14140,
         "pixels_across_track": 15552
     },
     {
         "name": "DMC II 250",
-        "focal_length": 92,
-        "sensor_size": 5.6,
+        "focal_length": 0.092,
+        "sensor_size": 0.0000056,
         "pixels_along_track": 14016,
         "pixels_across_track": 16768
     },
     {
         "name": "DMC III",
-        "focal_length": 92,
-        "sensor_size": 3.9,
+        "focal_length": 0.092,
+        "sensor_size": 0.0000039,
         "pixels_along_track": 14592,
         "pixels_across_track": 25728
     },
     {
         "name": "IXU 1000",
-        "focal_length": 55,
-        "sensor_size": 4.6,
+        "focal_length": 0.055,
+        "sensor_size": 0.0000046,
         "pixels_along_track": 8708,
         "pixels_across_track": 11608
     },
     {
         "name": "UltraCam-D",
-        "focal_length": 100,
-        "sensor_size": 9,
+        "focal_length": 0.100,
+        "sensor_size": 0.000009,
         "pixels_along_track": 7500,
         "pixels_across_track": 11500
     },
     {
         "name": "UltraCamEagle80mm",
-        "focal_length": 80,
-        "sensor_size": 5.2,
+        "focal_length": 0.080,
+        "sensor_size": 0.0000052,
         "pixels_along_track": 13080,
         "pixels_across_track": 20010
     },
     {
         "name": "UltraCamEagle210mm",
-        "focal_length": 210,
-        "sensor_size": 5.2,
+        "focal_length": 0.210,
+        "sensor_size": 0.0000052,
         "pixels_along_track": 13080,
         "pixels_across_track": 20010
     },
     {
         "name": "UltraCamLp",
-        "focal_length": 70,
-        "sensor_size": 6,
+        "focal_length": 0.070,
+        "sensor_size": 0.000006,
         "pixels_along_track": 7920,
         "pixels_across_track": 11704
     },
     {
         "name": "UltraCam-X",
-        "focal_length": 100,
-        "sensor_size": 7.2,
+        "focal_length": 0.100,
+        "sensor_size": 0.0000072,
         "pixels_along_track": 9420,
         "pixels_across_track": 14430
     },
     {
         "name": "UltraCamXP WA",
-        "focal_length": 70,
-        "sensor_size": 6,
+        "focal_length": 0.070,
+        "sensor_size": 0.000006,
         "pixels_along_track": 11310,
         "pixels_across_track": 17310
     },
     {
         "name": "UltraCamXp",
-        "focal_length": 100,
-        "sensor_size": 6,
+        "focal_length": 0.100,
+        "sensor_size": 0.000006,
         "pixels_along_track": 11310,
         "pixels_across_track": 17310
     }

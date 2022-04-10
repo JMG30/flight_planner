@@ -86,18 +86,22 @@ class FlightPlannerDialog(QtWidgets.QDialog, FORM_CLASS):
             self.combBcam.addItem('No cameras listed')
             self.combBcam.setCurrentText('No cameras listed')
 
-    def startWorker_control(self, pnt_lay, h, o, p, k, f, s_sensor, s_along,
-                            s_across, crs_vct, crs_rst, DTM, overlap_bool,
+        self.camera = Camera(name='',
+                            focal_length=self.doubleSpinBoxFocalLength.value(),
+                            sensor_size=self.doubleSpinBoxSensorSize.value(),
+                            pixels_along_track=self.spinBoxPixelsAlongTrack.value(),
+                            pixels_across_track=self.spinBoxPixelsAcrossTrack.value())
+
+    def startWorker_control(self, pnt_lay, h, o, p, k, camera,
+                            crs_vct, crs_rst, DTM, overlap_bool,
                             gsd_bool, footprint_bool, t):
         """Start worker for control module of plugin."""
         # Create a new worker instance
         worker = Worker(pointLayer=pnt_lay, hField=h, omegaField=o,
-                        phiField=p, kappaField=k, focal=f,
-                        size_sensor=s_sensor, size_along=s_along,
-                        size_across=s_across, crsVectorLayer=crs_vct,
-                        crsRasterLayer=crs_rst, DTM=DTM, overlap=overlap_bool,
-                        gsd=gsd_bool, footprint=footprint_bool,
-                        threshold=t)
+                        phiField=p, kappaField=k, camera=camera,
+                        crsVectorLayer=crs_vct, crsRasterLayer=crs_rst,
+                        DTM=DTM, overlap=overlap_bool, gsd=gsd_bool,
+                        footprint=footprint_bool, threshold=t)
 
         self.pBcancel.clicked.connect(worker.kill)
         # Start the worker in a new thread
@@ -191,25 +195,26 @@ class FlightPlannerDialog(QtWidgets.QDialog, FORM_CLASS):
     def on_combBcam_activated(self, i):
         camera_names = [camera.name for camera in self.cameras]
         if isinstance(i, int) and self.combBcam.currentText() in camera_names:
-            self.doubleSpinBoxFocalLength.setValue(self.cameras[i].focal_length)
-            self.doubleSpinBoxSensorSize.setValue(self.cameras[i].sensor_size)
+            self.doubleSpinBoxFocalLength.setValue(self.cameras[i].focal_length * 1_000)
+            self.doubleSpinBoxSensorSize.setValue(self.cameras[i].sensor_size * 1_000_000)
             self.spinBoxPixelsAlongTrack.setValue(self.cameras[i].pixels_along_track)
             self.spinBoxPixelsAcrossTrack.setValue(self.cameras[i].pixels_across_track)
+            self.camera.name = self.combBcam.currentText()
 
     def on_doubleSpinBoxFocalLength_valueChanged(self):
-        pass
+        self.camera.focal_length = self.doubleSpinBoxFocalLength.value() / 1_000
 
     def on_doubleSpinBoxGSD_valueChanged(self):
         pass
 
     def on_doubleSpinBoxSensorSize_valueChanged(self):
-        pass
+        self.camera.sensor_size = self.doubleSpinBoxSensorSize.value() / 1_000_000
 
     def on_spinBoxPixelsAlongTrack_valueChanged(self):
-        pass
+        self.camera.pixels_along_track = self.spinBoxPixelsAlongTrack.value()
 
     def on_spinBoxPixelsAcrossTrack_valueChanged(self):
-        pass
+        self.camera.pixels_across_track = self.spinBoxPixelsAcrossTrack.value()
 
     def on_doubleSpinBoxMaxHeight_valueChanged(self):
         pass
@@ -256,14 +261,12 @@ class FlightPlannerDialog(QtWidgets.QDialog, FORM_CLASS):
 
     def on_cBincreaseOverlap_stateChanged(self):
         try:
-            focal = self.doubleSpinBoxFocalLength.value()
-            gsd = self.doubleSpinBoxGSD.value()
-            sensor = self.doubleSpinBoxSensorSize.value()
+            gsd = self.doubleSpinBoxGSD.value() / 100
             max_h = self.doubleSpinBoxMaxHeight.value()
             min_h = self.doubleSpinBoxMinHeight.value()
             p0 = self.doubleSpinBoxOverlap.value()
             q0 = self.doubleSpinBoxSidelap.value()
-            W = ((gsd * 10) / (sensor / 1000) * focal) / 1000
+            W = gsd / self.camera.sensor_size * self.camera.focal_length
             if self.cBincreaseOverlap.isChecked():
                 # remember old values of overlap p, sidelap q
                 self.p0_prev = self.doubleSpinBoxOverlap.value()
@@ -418,11 +421,7 @@ class FlightPlannerDialog(QtWidgets.QDialog, FORM_CLASS):
     def on_pBaccept_clicked(self):
         """Push Button to make a flight plan."""
         try:
-            focal = self.doubleSpinBoxFocalLength.value()
-            gsd = self.doubleSpinBoxGSD.value()
-            sensor = self.doubleSpinBoxSensorSize.value()
-            along = self.spinBoxPixelsAlongTrack.value()
-            across = self.spinBoxPixelsAcrossTrack.value()
+            gsd = self.doubleSpinBoxGSD.value() / 100
             max_h = self.doubleSpinBoxMaxHeight.value()
             min_h = self.doubleSpinBoxMinHeight.value()
             p0 = self.doubleSpinBoxOverlap.value()
@@ -431,7 +430,7 @@ class FlightPlannerDialog(QtWidgets.QDialog, FORM_CLASS):
             x_percent = self.sBexceedingExtremeStrips.value()
 
             # flight height above mean terrain height
-            w = ((gsd * 10) / (sensor / 1000) * focal) / 1000
+            w = gsd / self.camera.sensor_size * self.camera.focal_length
             mean_h = (max_h + min_h) / 2
             # above sea level flight height
             w0 = w + mean_h
@@ -439,8 +438,8 @@ class FlightPlannerDialog(QtWidgets.QDialog, FORM_CLASS):
                 self.p = p0 / 100
                 self.q = q0 / 100
             # image length along and across flight direction[m]
-            len_along = along * gsd / 100
-            len_across = across * gsd / 100
+            len_along = self.camera.pixels_along_track * gsd
+            len_across = self.camera.pixels_across_track * gsd
             # longitudinal base Bx, transverse base By
             Bx = len_along * (1 - self.p)
             By = len_across * (1 - self.q)
@@ -591,10 +590,6 @@ class FlightPlannerDialog(QtWidgets.QDialog, FORM_CLASS):
             o_field = self.omegaFieldComboBox.currentField()
             p_field = self.phiFieldComboBox.currentField()
             k_field = self.kappaFieldComboBox.currentField()
-            focal = self.doubleSpinBoxFocalLength.value() / 1000  # [m]
-            size_sensor = self.doubleSpinBoxSensorSize.value() / 1000000  # [m]
-            size_along = self.spinBoxPixelsAlongTrack.value()
-            size_across = self.spinBoxPixelsAcrossTrack.value()
             threshold = self.dSpinBoxThreshold.value()
             if not self.crs_rst or not h_field or not o_field or not p_field \
                     or not k_field:
@@ -607,9 +602,8 @@ class FlightPlannerDialog(QtWidgets.QDialog, FORM_CLASS):
         else:
             # start worker to move hard task into a separate thread
             self.startWorker_control(pnt_lay=proj_centres, h=h_field,
-                                     o=o_field, p=p_field, k=k_field, f=focal,
-                                     s_sensor=size_sensor, s_along=size_along,
-                                     s_across=size_across, crs_vct=self.crs_vct_ctrl,
+                                     o=o_field, p=p_field, k=k_field,
+                                     camera=self.camera, crs_vct=self.crs_vct_ctrl,
                                      crs_rst=self.crs_rst, DTM=self.raster,
                                      overlap_bool=self.cBoverlapPict.isChecked(),
                                      gsd_bool=self.cBgsdMap.isChecked(),
@@ -656,8 +650,8 @@ class FlightPlannerDialog(QtWidgets.QDialog, FORM_CLASS):
                 self.combBcam.removeItem(selected_camera_index)
 
                 if self.combBcam.currentText() in camera_names:
-                    self.doubleSpinBoxFocalLength.setValue(self.cameras[self.combBcam.currentIndex()].focal_length)
-                    self.doubleSpinBoxSensorSize.setValue(self.cameras[self.combBcam.currentIndex()].sensor_size)
+                    self.doubleSpinBoxFocalLength.setValue(self.cameras[self.combBcam.currentIndex()].focal_length * 1_000)
+                    self.doubleSpinBoxSensorSize.setValue(self.cameras[self.combBcam.currentIndex()].sensor_size * 1_000_000)
                     self.spinBoxPixelsAlongTrack.setValue(self.cameras[self.combBcam.currentIndex()].pixels_along_track)
                     self.spinBoxPixelsAcrossTrack.setValue(self.cameras[self.combBcam.currentIndex()].pixels_across_track)
                 else:

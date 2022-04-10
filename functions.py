@@ -25,31 +25,12 @@ import scipy.ndimage as ndimage
 from PyQt5.QtCore import QVariant
 from qgis.analysis import QgsZonalStatistics
 from qgis.core import (
-    QgsCoordinateReferenceSystem,
-    QgsCoordinateTransform,
     QgsFeature,
     QgsField,
     QgsGeometry,
     QgsPointXY,
-    QgsProcessingUtils,
-    QgsProject,
-    QgsRasterBandStats,
-    QgsRasterLayer,
     QgsVectorLayer
 )
-
-
-def image_corners(size_sensor, size_across, size_along, focal):
-    """Return array of x, y, z coordinates of image corners in image space"""
-
-    x = size_sensor * size_along / 2
-    y = size_sensor * size_across / 2
-    xyf_img_corners = np.array([[-x, y, -focal],
-                                [-x, -y, -focal],
-                                [x, -y, -focal],
-                                [x, y, -focal]
-                               ])
-    return xyf_img_corners
 
 
 def clip_raster(ds, xyf, R, Xs, Ys, Zs, Z_min, trans_v_r, crs_rst, crs_vct):
@@ -236,21 +217,20 @@ def ground_edge_points(R, Z, threshold, xyf, Xs, Ys, Zs,
     return XY
 
 
-def image_edge_points(size_sensor, size_across, size_along, Z, Zs, focal,
-                      mean_res):
+def image_edge_points(camera, Z, Zs, mean_res):
     """Create a list of coordinates of points that represent the edges
     of the image in the image's coordinate system."""
     # approximate ground size Lx, Ly of the image
     W = Zs - Z
-    Ly = size_across * size_sensor * W / focal
-    Lx = size_along * size_sensor * W / focal
+    Ly = camera.pixels_across_track * camera.sensor_size * W / camera.focal_length
+    Lx = camera.pixels_along_track * camera.sensor_size * W / camera.focal_length
     # number of points along the edges of the image
     num_y = Ly / mean_res
     num_x = Lx / mean_res
 
     # max x and y coordinate of the image
-    x_max = size_sensor * size_along / 2
-    y_max = size_sensor * size_across / 2
+    x_max = camera.sensor_size * camera.pixels_along_track / 2
+    y_max = camera.sensor_size * camera.pixels_across_track / 2
     # x or y coordinates to build later [x, y] edges
     y_vertical = np.linspace(-y_max, y_max, int(num_y)).reshape(-1, 1)
     x_horizontal = np.linspace(-x_max, x_max, int(num_x)).reshape(-1, 1)
@@ -263,7 +243,7 @@ def image_edge_points(size_sensor, size_across, size_along, Z, Zs, focal,
     right_edge = np.hstack((x_vertical * x_max, y_vertical * -1))
     bottom_edge = np.hstack((x_horizontal * -1, y_horizontal * -y_max))
     xy = np.vstack((left_edge, top_edge, right_edge, bottom_edge))
-    xyf = np.append(xy, np.ones((xy.shape[0], 1)) * -focal, axis=1)
+    xyf = np.append(xy, np.ones((xy.shape[0], 1)) * -camera.focal_length, axis=1)
 
     return xyf
 

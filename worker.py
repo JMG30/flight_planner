@@ -26,12 +26,10 @@ from qgis.core import (
     QgsRasterShader,
     QgsSingleBandPseudoColorRenderer,
     QgsVectorLayer,
-    QgsProject,
 )
 
 from .functions import (
     ground_edge_points,
-    image_corners,
     image_edge_points,
     crs2pixel,
     rotation_matrix,
@@ -65,10 +63,7 @@ class Worker(QObject):
         self.omega_f = data.get('omegaField')
         self.phi_f = data.get('phiField')
         self.kappa_f = data.get('kappaField')
-        self.f = data.get('focal')
-        self.size_sensor = data.get('size_sensor')
-        self.size_along = data.get('size_along')
-        self.size_across = data.get('size_across')
+        self.camera = data.get('camera')
         self.overlap_bool = data.get('overlap')
         self.gsd_bool = data.get('gsd')
         self.footprint_bool = data.get('footprint')
@@ -128,8 +123,7 @@ class Worker(QObject):
             lrx_list = []
             lry_list = []
 
-            xyf_corners = image_corners(self.size_sensor, self.size_across,
-                                        self.size_along, self.f)
+            xyf_corners = self.camera.image_corners()
 
             feat_count = self.layer.featureCount()
             progress_c = 0
@@ -165,9 +159,7 @@ class Worker(QObject):
                                                      np.array([[r, c]]).T)[0]
 
                 # edge points list in image space
-                xyf = image_edge_points(self.size_sensor, self.size_across,
-                                        self.size_along, Z_under_pc, Zs, self.f,
-                                        mean_res)
+                xyf = image_edge_points(self.camera, Z_under_pc, Zs, mean_res)
 
                 # ground coordinates of photo edge points
                 footprint_vertices = ground_edge_points(R, Z_under_pc,
@@ -201,7 +193,7 @@ class Worker(QObject):
                     fitted_DTM = clipped_DTM[deltar:overlap_arr.shape[0]+deltar, deltac:overlap_arr.shape[1]+deltac]
 
                     projection_center = np.array([[Xs], [Ys], [Zs]])
-                    img_coords = np.array([[0], [0], [-self.f]])
+                    img_coords = np.array([[0], [0], [-self.camera.focal_length]])
                     image_crs = np.add(projection_center,
                                        np.dot(R, img_coords))
                     X = image_crs[0][0]
@@ -209,7 +201,7 @@ class Worker(QObject):
                     Z = image_crs[2][0]
 
                     gsd_array = gsd(fitted_DTM, overlap_geot, Xs, Ys, Zs, X, Y,
-                                    Z, self.f, self.size_sensor)
+                                    Z, self.camera.focal_length, self.camera.sensor_size)
 
                     gsd_masked = gsd_array * overlap_arr
                     gsd_masked = np.where(gsd_masked == 0, 1000, gsd_masked)
