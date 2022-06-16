@@ -61,30 +61,47 @@ class FlightPlannerDialog(QtWidgets.QDialog, FORM_CLASS):
         super(FlightPlannerDialog, self).__init__(parent)
         # Set up the user interface from Designer through FORM_CLASS.
         self.setupUi(self)
-        self.tabWidgetBlock = True
-        self.tabWidgetCorridor = False
+        
+        self.tabBlock = True
+        self.tabCorridor = False
+        self.mMapLayerComboBoxAoI.setLayer(None)
+        self.mMapLayerComboBoxCorridor.setLayer(None)
+        self.mMapLayerComboBoxDTM.setLayer(None)
+        self.mMapLayerComboBoxProjectionCentres.setLayer(None)
+
+        self.mGroupBox.setToolTip("* Maximum and minimum height"
+            " (together with camera parameters and GSD/Alt. AGL)"
+            " are used to calculate increased Overlap/Sidelap."
+            "\nThe heights are also used to calculate average "
+            "terrain height, but only in 'One altitude for entire"
+            " flight' mode. Read more about it in the Guide.")
+        self.mGroupBox.setToolTipDuration(20000)
 
         # Set up filters for ComboBoxes
-        self.pcMapLayCombB.setFilters(QgsMapLayerProxyModel.PointLayer)
-        self.altitudeFieldComboBox.setFilters(QgsFieldProxyModel.Numeric)
-        self.omegaFieldComboBox.setFilters(QgsFieldProxyModel.Numeric)
-        self.phiFieldComboBox.setFilters(QgsFieldProxyModel.Numeric)
-        self.kappaFieldComboBox.setFilters(QgsFieldProxyModel.Numeric)
-        self.dtmMapLayCombB.setFilters(QgsMapLayerProxyModel.RasterLayer)
-        self.aoiMapLayCombB.setFilters(QgsMapLayerProxyModel.PolygonLayer)
-        self.corMapLayCombB.setFilters(QgsMapLayerProxyModel.LineLayer)
+        self.mMapLayerComboBoxProjectionCentres.setFilters(QgsMapLayerProxyModel.PointLayer)
+        self.mFieldComboBoxAltControl.setFilters(QgsFieldProxyModel.Numeric)
+        self.mFieldComboBoxOmega.setFilters(QgsFieldProxyModel.Numeric)
+        self.mFieldComboBoxPhi.setFilters(QgsFieldProxyModel.Numeric)
+        self.mFieldComboBoxKappa.setFilters(QgsFieldProxyModel.Numeric)
+        self.mMapLayerComboBoxDTM.setFilters(QgsMapLayerProxyModel.RasterLayer)
+        self.mMapLayerComboBoxAoI.setFilters(QgsMapLayerProxyModel.PolygonLayer)
+        self.mMapLayerComboBoxCorridor.setFilters(QgsMapLayerProxyModel.LineLayer)
+
+        self.comboBoxAltitudeType.addItems(["One altitude for entire flight",
+            "Separate altitude for each strip",
+            "Terrain following"])
 
         # Set up ComboBox of camera
         self.cameras_file = os.path.join(
             os.path.dirname(os.path.abspath(__file__)), 'cameras.json')
         with open(self.cameras_file, 'r', encoding='utf-8') as file:
             self.cameras = [Camera(**camera) for camera in json.load(file)]
-            self.combBcam.addItems([camera.name for camera in self.cameras])
-        if self.combBcam.count() > 0:
-            self.combBcam.setItemText(0, 'Select camera or set parameters')
+            self.comboBoxCamera.addItems([camera.name for camera in self.cameras])
+        if self.comboBoxCamera.count() > 0:
+            self.comboBoxCamera.setItemText(0, 'Select camera or set parameters')
         else:
-            self.combBcam.addItem('No cameras listed')
-            self.combBcam.setCurrentText('No cameras listed')
+            self.comboBoxCamera.addItem('No cameras listed')
+            self.comboBoxCamera.setCurrentText('No cameras listed')
 
         self.camera = Camera(name='',
                             focal_length=self.doubleSpinBoxFocalLength.value(),
@@ -103,55 +120,55 @@ class FlightPlannerDialog(QtWidgets.QDialog, FORM_CLASS):
                         DTM=DTM, overlap=overlap_bool, gsd=gsd_bool,
                         footprint=footprint_bool, threshold=t)
 
-        self.pBcancel.clicked.connect(worker.kill)
+        self.pushButtonStopControl.clicked.connect(worker.kill)
         # Start the worker in a new thread
         thread = QThread(self)
         worker.moveToThread(thread)
         worker.finished.connect(self.workerFinished)
         worker.error.connect(self.workerError)
-        worker.progress.connect(self.progressBar.setValue)
-        worker.enabled.connect(self.pBacceptControl.setEnabled)
-        worker.enabled.connect(self.pBaccept.setEnabled)
+        worker.progress.connect(self.progressBarControl.setValue)
+        worker.enabled.connect(self.pushButtonRunControl.setEnabled)
+        worker.enabled.connect(self.pushButtonRunDesign.setEnabled)
         thread.started.connect(worker.run_control)
         thread.start()
         self.thread = thread
         self.worker = worker
 
     def startWorker_updateAltitude(self, pnt_lay, theta, dist, crs_vct, DTM, w,
-                                   layer_pol, s=None, tabWidget=None, geom=None):
+                                   layer_pol, s=None, tabWidgetBlockCorridor=None,
+                                   geom=None):
         """Start a worker for update altitude of flight in 'altitude for
         each strip' or 'terraing following' mode."""
-        if self.rBstripsAltitude.isChecked():
-            if tabWidget:
+        if self.comboBoxAltitudeType.currentText() == 'Separate altitude for each strip':
+            if tabWidgetBlockCorridor:
                 worker = Worker(pointLayer=pnt_lay, theta=theta, distance=dist,
                                 crsVectorLayer=crs_vct, DTM=DTM, height=w,
-                                strips=s, tabWidg=tabWidget, LineRangeList=geom,
-                                polygonLayer=layer_pol)
+                                strips=s, tabWidg=tabWidgetBlockCorridor,
+                                LineRangeList=geom, polygonLayer=layer_pol)
             else:
                 worker = Worker(pointLayer=pnt_lay, theta=theta, distance=dist,
                                 crsVectorLayer=crs_vct, DTM=DTM, height=w,
-                                strips=s, tabWidg=tabWidget, Range=geom,
+                                strips=s, tabWidg=tabWidgetBlockCorridor, Range=geom,
                                 polygonLayer=layer_pol)
 
-        elif self.rBterrainFollowing.isChecked():
+        elif self.comboBoxAltitudeType.currentText() == 'Terrain following':
             worker = Worker(pointLayer=pnt_lay, theta=theta, distance=dist,
                             crsVectorLayer=crs_vct, DTM=DTM, height=w,
                             polygonLayer=layer_pol)
 
-        # Create a new worker instance                  
-        self.pBcancel.clicked.connect(worker.kill)
+        # Create a new worker instance
         # Start the worker in a new thread
         thread = QThread(self)
         worker.moveToThread(thread)
         worker.finished.connect(self.workerFinished)
         worker.error.connect(self.workerError)
         worker.progress.connect(self.progressBar.setValue)
-        worker.enabled.connect(self.pBaccept.setEnabled)
-        worker.enabled.connect(self.pBacceptControl.setEnabled)
+        worker.enabled.connect(self.pushButtonRunDesign.setEnabled)
+        worker.enabled.connect(self.pushButtonRunControl.setEnabled)
 
-        if self.rBstripsAltitude.isChecked():
+        if self.comboBoxAltitudeType.currentText() == 'Separate altitude for each strip':
             thread.started.connect(worker.run_altitudeStrip)
-        elif self.rBterrainFollowing.isChecked():
+        elif self.comboBoxAltitudeType.currentText() == 'Terrain following':
             thread.started.connect(worker.run_followingTerrain)
 
         thread.start()
@@ -176,39 +193,105 @@ class FlightPlannerDialog(QtWidgets.QDialog, FORM_CLASS):
         save_error()
         QMessageBox.about(self, 'Error', 'See error log file in plugin folder')
 
-    def on_pBcancel_clicked(self):
+
+    def check_set_gsd(self):
+        gsd = (self.doubleSpinBoxAltAGL.value()*100) \
+            / (self.doubleSpinBoxFocalLength.value()/10) \
+            * (self.doubleSpinBoxSensorSize.value()/10_000)
+        if gsd > self.doubleSpinBoxGSD.maximum():
+            self.doubleSpinBoxGSD.setValue(-1)
+            self.doubleSpinBoxGSD.setSpecialValueText(f"> {self.doubleSpinBoxGSD.maximum()} [cm/px]")
+        elif gsd < self.doubleSpinBoxGSD.minimum():
+            self.doubleSpinBoxGSD.setValue(-1)
+            self.doubleSpinBoxGSD.setSpecialValueText(f"< {self.doubleSpinBoxGSD.minimum()} [cm/px]")
+        else:
+            self.doubleSpinBoxGSD.setSpecialValueText("")
+            self.doubleSpinBoxGSD.setValue(gsd)
+
+    def check_set_altitude(self):
+        w = (self.doubleSpinBoxGSD.value()/100) \
+            / (self.doubleSpinBoxSensorSize.value()/1_000_000) \
+            * (self.doubleSpinBoxFocalLength.value()/1000)
+        if w < self.doubleSpinBoxAltAGL.minimum():
+            self.doubleSpinBoxAltAGL.setValue(-1)
+            self.doubleSpinBoxAltAGL.setSpecialValueText(f"< {self.doubleSpinBoxAltAGL.minimum()} [m]")
+        else:
+            self.doubleSpinBoxAltAGL.setSpecialValueText("")
+            self.doubleSpinBoxAltAGL.setValue(w)
+
+    def on_pushButtonStopControl_clicked(self):
         pass
 
     def on_progressBar_valueChanged(self):
         pass
 
-    def on_combBcam_highlighted(self):
-        camera_names = [camera.name for camera in self.cameras]
-        items_list = [self.combBcam.itemText(i) for i in range(self.combBcam.count())]
-        if ("Select camera or set parameters" in items_list or "No cameras listed" in items_list) and camera_names:
-            self.combBcam.clear()
-            self.combBcam.addItems(camera_names)
-        elif ("Select camera or set parameters" in items_list) and not camera_names:
-            self.combBcam.clear()
-            self.combBcam.addItem("No cameras listed")
+    def on_progressBarControl_valueChanged(self):
+        pass
 
-    def on_combBcam_activated(self, i):
+    def on_comboBoxCamera_highlighted(self):
         camera_names = [camera.name for camera in self.cameras]
-        if isinstance(i, int) and self.combBcam.currentText() in camera_names:
+        items_list = [self.comboBoxCamera.itemText(i) for i in range(self.comboBoxCamera.count())]
+        if ("Select camera or set parameters" in items_list 
+            or "No cameras listed" in items_list) and camera_names:
+            self.comboBoxCamera.clear()
+            self.comboBoxCamera.addItems(camera_names)
+        elif ("Select camera or set parameters" in items_list) and not camera_names:
+            self.comboBoxCamera.clear()
+            self.comboBoxCamera.addItem("No cameras listed")
+
+    def on_comboBoxCamera_activated(self, i):
+        camera_names = [camera.name for camera in self.cameras]
+        if isinstance(i, int) and self.comboBoxCamera.currentText() in camera_names:
             self.doubleSpinBoxFocalLength.setValue(self.cameras[i].focal_length * 1_000)
             self.doubleSpinBoxSensorSize.setValue(self.cameras[i].sensor_size * 1_000_000)
             self.spinBoxPixelsAlongTrack.setValue(self.cameras[i].pixels_along_track)
             self.spinBoxPixelsAcrossTrack.setValue(self.cameras[i].pixels_across_track)
-            self.camera.name = self.combBcam.currentText()
+            self.camera.name = self.comboBoxCamera.currentText()
+
+    def on_comboBoxAltitudeType_activated(self, text):
+        if isinstance(text, str):
+            if text in ['Separate altitude for each strip', 'Terrain following'] \
+                and not self.mMapLayerComboBoxDTM.currentLayer():
+                QMessageBox.about(self, 'DTM needed', 'You must select DTM to use this option')
+                self.comboBoxAltitudeType.setCurrentText("One altitude for entire flight")
+            elif text == 'Terrain following' and self.mMapLayerComboBoxDTM.currentLayer():
+                self.doubleSpinBoxSlopeThreshold.setEnabled(True)
+            else:
+                self.doubleSpinBoxSlopeThreshold.setEnabled(False)
+
+            if self.comboBoxAltitudeType.currentText() != 'One altitude for entire flight':
+                self.checkBoxIncreaseOverlap.setChecked(False)
+                self.checkBoxIncreaseOverlap.setEnabled(False)
+                self.pushButtonGetHeights.setEnabled(False)
+                self.doubleSpinBoxMaxHeight.setEnabled(False)
+                self.doubleSpinBoxMinHeight.setEnabled(False)
+            else:
+                self.checkBoxIncreaseOverlap.setEnabled(True)
+                self.pushButtonGetHeights.setEnabled(True)
+                self.doubleSpinBoxMaxHeight.setEnabled(True)
+                self.doubleSpinBoxMinHeight.setEnabled(True)
 
     def on_doubleSpinBoxFocalLength_valueChanged(self):
         self.camera.focal_length = self.doubleSpinBoxFocalLength.value() / 1_000
-
-    def on_doubleSpinBoxGSD_valueChanged(self):
-        pass
+        if self.radioButtonGSD.isChecked():
+            self.check_set_altitude()
+        elif self.radioButtonAltAGL.isChecked():
+            self.check_set_gsd()
 
     def on_doubleSpinBoxSensorSize_valueChanged(self):
         self.camera.sensor_size = self.doubleSpinBoxSensorSize.value() / 1_000_000
+        if self.radioButtonGSD.isChecked():
+            self.check_set_altitude()
+        elif self.radioButtonAltAGL.isChecked():
+            self.check_set_gsd()
+
+    def on_doubleSpinBoxGSD_valueChanged(self):
+        if self.radioButtonGSD.isChecked():
+            self.check_set_altitude()
+
+    def on_doubleSpinBoxAltAGL_valueChanged(self):
+        if self.radioButtonAltAGL.isChecked():
+            self.check_set_gsd()
 
     def on_spinBoxPixelsAlongTrack_valueChanged(self):
         self.camera.pixels_along_track = self.spinBoxPixelsAlongTrack.value()
@@ -228,38 +311,22 @@ class FlightPlannerDialog(QtWidgets.QDialog, FORM_CLASS):
     def on_doubleSpinBoxSidelap_valueChanged(self):
         pass
 
-    def on_dSpinBoxBuffer_valueChanged(self):
+    def on_doubleSpinBoxBuffer_valueChanged(self):
         pass
 
-    def on_dSpinBoxThreshold_valueChanged(self):
+    def on_doubleSpinBoxIterationThreshold_valueChanged(self):
         pass
 
-    def on_rBoneAltitude_toggled(self):
+    def on_checkBoxOverlapImages_stateChanged(self):
         pass
 
-    def on_rBstripsAltitude_toggled(self):
+    def on_checkBoxFootprint_stateChanged(self):
         pass
 
-    def on_rBterrainFollowing_toggled(self):
+    def on_checkBoxGSDmap_stateChanged(self):
         pass
 
-    def on_cBoverlapPict_stateChanged(self):
-        pass
-
-    def on_cBfootprint_stateChanged(self):
-        if self.cBfootprint.isChecked():
-            self.dSpinBoxThreshold.setEnabled(True)
-            self.label_iteration.setEnabled(True)
-            self.label_threshold.setEnabled(True)
-        else:
-            self.dSpinBoxThreshold.setEnabled(False)
-            self.label_iteration.setEnabled(False)
-            self.label_threshold.setEnabled(False)
-
-    def on_cBgsdMap_stateChanged(self):
-        pass
-
-    def on_cBincreaseOverlap_stateChanged(self):
+    def on_checkBoxIncreaseOverlap_stateChanged(self):
         try:
             gsd = self.doubleSpinBoxGSD.value() / 100
             max_h = self.doubleSpinBoxMaxHeight.value()
@@ -267,7 +334,7 @@ class FlightPlannerDialog(QtWidgets.QDialog, FORM_CLASS):
             p0 = self.doubleSpinBoxOverlap.value()
             q0 = self.doubleSpinBoxSidelap.value()
             W = gsd / self.camera.sensor_size * self.camera.focal_length
-            if self.cBincreaseOverlap.isChecked():
+            if self.checkBoxIncreaseOverlap.isChecked():
                 # remember old values of overlap p, sidelap q
                 self.p0_prev = self.doubleSpinBoxOverlap.value()
                 self.q0_prev = self.doubleSpinBoxSidelap.value()
@@ -283,339 +350,399 @@ class FlightPlannerDialog(QtWidgets.QDialog, FORM_CLASS):
             self.doubleSpinBoxOverlap.setValue(self.p * 100)
             self.doubleSpinBoxSidelap.setValue(self.q * 100)
 
-    def on_sBmultipleBase(self):
+    def on_spinBoxMultipleBase(self):
         pass
 
-    def on_pcMapLayCombB_layerChanged(self):
+    def on_mMapLayerComboBoxProjectionCentres_layerChanged(self):
         try:
-            if self.pcMapLayCombB.currentLayer():
-                proj_cent_layer = self.pcMapLayCombB.currentLayer()
+            if self.mMapLayerComboBoxProjectionCentres.currentLayer():
+                proj_cent_layer = self.mMapLayerComboBoxProjectionCentres.currentLayer()
                 self.crs_vct_ctrl = proj_cent_layer.sourceCrs().authid()
                 crs = QgsCoordinateReferenceSystem(self.crs_vct_ctrl)
                 if crs.isGeographic():
                     QMessageBox.about(self, 'Error', 'CRS of layer cannot be' \
                                       + 'geographic')
-                    self.altitudeFieldComboBox.setLayer(None)
-                    self.omegaFieldComboBox.setLayer(None)
-                    self.phiFieldComboBox.setLayer(None)
-                    self.kappaFieldComboBox.setLayer(None)
+                    self.mFieldComboBoxAltControl.setLayer(None)
+                    self.mFieldComboBoxOmega.setLayer(None)
+                    self.mFieldComboBoxPhi.setLayer(None)
+                    self.mFieldComboBoxKappa.setLayer(None)
                 else:
-                    self.altitudeFieldComboBox.setLayer(proj_cent_layer)
-                    self.omegaFieldComboBox.setLayer(proj_cent_layer)
-                    self.phiFieldComboBox.setLayer(proj_cent_layer)
-                    self.kappaFieldComboBox.setLayer(proj_cent_layer)
+                    self.mFieldComboBoxAltControl.setLayer(proj_cent_layer)
+                    self.mFieldComboBoxOmega.setLayer(proj_cent_layer)
+                    self.mFieldComboBoxPhi.setLayer(proj_cent_layer)
+                    self.mFieldComboBoxKappa.setLayer(proj_cent_layer)
         except:
-            QMessageBox.about(self, 'Error', 'See error log file in plugin' \
-                              + 'folder')
+            QMessageBox.about(self, 'Error', 'See error log file in plugin'
+                              ' folder')
             save_error()
 
     def on_hFieldComboBox_fieldChanged(self):
         pass
 
-    def on_omegaFieldComboBox_fieldChanged(self):
+    def on_mFieldComboBoxOmega_fieldChanged(self):
         pass
 
-    def on_phiFieldComboBox_fieldChanged(self):
+    def on_mFieldComboBoxPhi_fieldChanged(self):
         pass
 
-    def on_kappaFieldComboBox_fieldChanged(self):
+    def on_mFieldComboBoxKappa_fieldChanged(self):
         pass
 
     @pyqtSlot()
-    def on_pBgetHeights_clicked(self):
-        try:
-            if self.tabWidgetBlock:
-                h_min, h_max = minmaxheight(self.AreaOfInterest, self.DTM)
-            else:
-                # setting minimum buffer size to be able to get heights
-                if self.crs_rst != self.crs_vct:
-                    transf_rst_vct = Transformer.from_crs(self.crs_rst,
-                                                          self.crs_vct,
-                                                          always_xy=True)
-                else:
-                    transf_rst_vct = None
-                g_rst = self.raster.GetGeoTransform()
-                pix_width = g_rst[1]
-                pix_height = -g_rst[5]
-                uplx = g_rst[0]
-                uply = g_rst[3]
-                uplx_n = uplx + pix_width
-                uply_n = uply + pix_height
-                xo, yo = transf_coord(transf_rst_vct, uplx, uply)
-                xo1, yo1 = transf_coord(transf_rst_vct, uplx_n, uply_n)
-                min_buff_size = max(ceil(fabs(xo1 - xo)), ceil(fabs(yo1 - yo)))
-                self.dSpinBoxBuffer.setMinimum(min_buff_size / 2)
-                buffLine = processing.run("native:buffer",
-                                          {'INPUT': self.pathLine,
-                                           'DISTANCE': self.dSpinBoxBuffer.value(),
-                                           'SEGMENTS': 5, 'END_CAP_STYLE': 0, 'JOIN_STYLE': 0,
-                                           'MITER_LIMIT': 2, 'DISSOLVE': False,
-                                           'OUTPUT': 'TEMPORARY_OUTPUT'})
-                self.bufferedLine = buffLine['OUTPUT']
-                h_min, h_max = minmaxheight(self.bufferedLine, self.DTM)
-        except:
-            QMessageBox.about(self, 'Error', 'Get heights from DTM failed')
-            save_error()
+    def on_pushButtonGetHeights_clicked(self):
+        attributes_exist = True
+        if not hasattr(self, 'DTM'):
+            QMessageBox.about(self, 'DTM needed',
+                'You have to load DTM layer')
+            attributes_exist = False
+
+        if self.tabBlock:
+            if not hasattr(self, 'AreaOfInterest'):
+                QMessageBox.about(self, 'AoI needed',
+                    'You have to load Area of Interest layer')
+                attributes_exist = False
         else:
-            self.doubleSpinBoxMinHeight.setValue(h_min)
-            self.doubleSpinBoxMaxHeight.setValue(h_max)
+            if not hasattr(self, 'pathLine'):
+                QMessageBox.about(self, 'Corridor line needed',
+                    'You have to load Corridor line layer')
+                attributes_exist = False
 
-    def on_corMapLayCombB_layerChanged(self):
-        self.CorLine = self.corMapLayCombB.currentLayer()
-        if not self.CorLine == None:
-            self.crs_vct = self.CorLine.sourceCrs().authid()
-            if QgsCoordinateReferenceSystem(self.crs_vct).isGeographic():
-                QMessageBox.about(self, 'Error',
-                                  'CRS of layer cannot be geographic')
-                self.corMapLayCombB.setLayer(None)
+        if attributes_exist:
+            try:
+                if self.tabBlock:
+                    h_min, h_max = minmaxheight(self.AreaOfInterest, self.DTM)
+                else:
+                    g_rst = self.raster.GetGeoTransform()
+                    pix_width = g_rst[1]
+                    pix_height = -g_rst[5]
+                    uplx = g_rst[0]
+                    uply = g_rst[3]
+                    uplx_n = uplx + pix_width
+                    uply_n = uply + pix_height
+                    xo, yo = uplx, uply
+                    xo1, yo1 = uplx_n, uply_n
+                    # setting minimum buffer size to be able to get heights
+                    if self.crs_rst != self.crs_vct:
+                        transf_rst_vct = Transformer.from_crs(self.crs_rst,
+                                                            self.crs_vct,
+                                                            always_xy=True)
+                        xo, yo = transf_coord(transf_rst_vct, uplx, uply)
+                        xo1, yo1 = transf_coord(transf_rst_vct, uplx_n, uply_n)
+
+                    min_buff_size = max(ceil(fabs(xo1 - xo)), ceil(fabs(yo1 - yo)))
+                    self.doubleSpinBoxBuffer.setMinimum(min_buff_size / 2)
+                    buffLine = processing.run("native:buffer",
+                                            {'INPUT': self.pathLine,
+                                            'DISTANCE': self.doubleSpinBoxBuffer.value(),
+                                            'SEGMENTS': 5, 'END_CAP_STYLE': 0, 'JOIN_STYLE': 0,
+                                            'MITER_LIMIT': 2, 'DISSOLVE': False,
+                                            'OUTPUT': 'TEMPORARY_OUTPUT'})
+                    self.bufferedLine = buffLine['OUTPUT']
+                    h_min, h_max = minmaxheight(self.bufferedLine, self.DTM)
+            except:
+                QMessageBox.about(self, 'Error', 'Get heights from DTM failed')
+                save_error()
             else:
+                self.doubleSpinBoxMinHeight.setValue(h_min)
+                self.doubleSpinBoxMaxHeight.setValue(h_max)
+
+    def on_mMapLayerComboBoxCorridor_layerChanged(self):
+        if self.mMapLayerComboBoxCorridor.currentLayer():
+            self.CorLine = self.mMapLayerComboBoxCorridor.currentLayer()
+            if self.CorLine.sourceCrs().mapUnits() == 0:
+                self.crs_vct = self.CorLine.sourceCrs().authid()
                 self.pathLine = self.CorLine.dataProvider().dataSourceUri()
-
-    def on_aoiMapLayCombB_layerChanged(self):
-        self.AreaOfInterest = self.aoiMapLayCombB.currentLayer()
-        if not self.AreaOfInterest == None:
-            self.crs_vct = self.AreaOfInterest.sourceCrs().authid()
-            if QgsCoordinateReferenceSystem(self.crs_vct).isGeographic():
-                QMessageBox.about(self, 'Error',
-                                  'CRS of layer cannot be geographic')
-                self.aoiMapLayCombB.setLayer(None)
             else:
+                QMessageBox.about(self, 'Incorrect CRS', 'The layer units must be meters')
+                self.mMapLayerComboBoxCorridor.setLayer(None)
+
+    def on_mMapLayerComboBoxAoI_layerChanged(self):
+        if self.mMapLayerComboBoxAoI.currentLayer():
+            self.AreaOfInterest = self.mMapLayerComboBoxAoI.currentLayer()
+            if self.AreaOfInterest.sourceCrs().mapUnits() == 0:
+                self.crs_vct = self.AreaOfInterest.sourceCrs().authid()
                 features = self.AreaOfInterest.getFeatures()
                 for feature in features:
                     self.geom_AoI = feature.geometry()
+            else:
+                QMessageBox.about(self, 'Incorrect CRS', 'The layer units must be meters')
+                self.mMapLayerComboBoxAoI.setLayer(None)
 
-    def on_dtmMapLayCombB_layerChanged(self):
-        if self.dtmMapLayCombB.currentLayer():
-            self.DTM = self.dtmMapLayCombB.currentLayer()
+    def on_mMapLayerComboBoxDTM_layerChanged(self):
+        if self.mMapLayerComboBoxDTM.currentLayer():
+            self.DTM = self.mMapLayerComboBoxDTM.currentLayer()
             self.crs_rst = self.DTM.crs().authid()
             pathDTM = self.DTM.source()
             self.raster = gdal.Open(pathDTM)
-            self.rBstripsAltitude.setEnabled(True)
-            self.rBterrainFollowing.setEnabled(True)
-            self.pBgetHeights.setEnabled(True)
 
-    def on_tabWidget_currentChanged(self):
-        if self.tabWidget.currentIndex() == 0:
-            self.tabWidgetBlock = True
-            self.tabWidgetCorridor = False
+    def on_tabWidgetBlockCorridor_currentChanged(self):
+        if self.tabWidgetBlockCorridor.currentIndex() == 0:
+            self.tabBlock = True
+            self.tabCorridor = False
         else:
-            self.tabWidgetBlock = False
-            self.tabWidgetCorridor = True
+            self.tabBlock = False
+            self.tabCorridor = True
 
     def on_dial_valueChanged(self):
         if self.dial.value() > 180:
-            self.sBdirection.setValue(self.dial.value() - 180)
+            self.spinBoxDirection.setValue(self.dial.value() - 180)
         else:
-            self.sBdirection.setValue(self.dial.value() + 180)
+            self.spinBoxDirection.setValue(self.dial.value() + 180)
 
-    def on_sBdirection_valueChanged(self):
-        if self.sBdirection.value() > 180:
-            self.dial.setValue(self.sBdirection.value() - 180)
+    def on_spinBoxDirection_valueChanged(self):
+        if self.spinBoxDirection.value() > 180:
+            self.dial.setValue(self.spinBoxDirection.value() - 180)
         else:
-            self.dial.setValue(self.sBdirection.value() + 180)
+            self.dial.setValue(self.spinBoxDirection.value() + 180)
 
-    def on_sBexceedingExtremeStrips(self):
+    def on_spinBoxExceedExtremeStrips(self):
         pass
 
+    def on_radioButtonGSD_toggled(self):
+        if self.radioButtonGSD.isChecked():
+            self.doubleSpinBoxAltAGL.setEnabled(False)
+            self.doubleSpinBoxGSD.setEnabled(True)
+            if self.doubleSpinBoxGSD.specialValueText() == f"> {self.doubleSpinBoxGSD.maximum()} [cm/px]":
+                self.doubleSpinBoxGSD.setSpecialValueText("")
+                self.doubleSpinBoxGSD.setValue(self.doubleSpinBoxGSD.maximum())
+            elif self.doubleSpinBoxGSD.specialValueText() == f"< {self.doubleSpinBoxGSD.minimum()} [cm/px]":
+                self.doubleSpinBoxGSD.setSpecialValueText("")
+                self.doubleSpinBoxGSD.setValue(self.doubleSpinBoxGSD.minimum())
+            self.check_set_altitude()
+        elif self.radioButtonAltAGL.isChecked():
+            self.doubleSpinBoxAltAGL.setEnabled(True)
+            self.doubleSpinBoxGSD.setEnabled(False)
+            if self.doubleSpinBoxAltAGL.specialValueText() == f"< {self.doubleSpinBoxAltAGL.minimum()} [m]":
+                self.doubleSpinBoxAltAGL.setSpecialValueText("")
+                self.doubleSpinBoxAltAGL.setValue(self.doubleSpinBoxAltAGL.minimum())
+            self.check_set_gsd()
+
     @pyqtSlot()
-    def on_pBaccept_clicked(self):
+    def on_pushButtonRunDesign_clicked(self):
         """Push Button to make a flight plan."""
-        try:
-            gsd = self.doubleSpinBoxGSD.value() / 100
-            max_h = self.doubleSpinBoxMaxHeight.value()
-            min_h = self.doubleSpinBoxMinHeight.value()
-            p0 = self.doubleSpinBoxOverlap.value()
-            q0 = self.doubleSpinBoxSidelap.value()
-            mult_base = self.sBmultipleBase.value()
-            x_percent = self.sBexceedingExtremeStrips.value()
+        attributes_exist = True
+        if self.comboBoxAltitudeType.currentText() in ['Separate altitude for each strip', 'Terrain following']:
+            if not hasattr(self, 'DTM'):
+                QMessageBox.about(self, 'DTM needed', 'You have to load DTM layer')
+                attributes_exist = False
 
-            # flight height above mean terrain height
-            w = gsd / self.camera.sensor_size * self.camera.focal_length
-            mean_h = (max_h + min_h) / 2
-            # above sea level flight height
-            w0 = w + mean_h
-            if not self.cBincreaseOverlap.isChecked():
-                self.p = p0 / 100
-                self.q = q0 / 100
-            # image length along and across flight direction[m]
-            len_along = self.camera.pixels_along_track * gsd
-            len_across = self.camera.pixels_across_track * gsd
-            # longitudinal base Bx, transverse base By
-            Bx = len_along * (1 - self.p)
-            By = len_across * (1 - self.q)
-            strip = 0
-            photo = 0
+        if self.tabBlock:
+            if not hasattr(self, 'AreaOfInterest'):
+                QMessageBox.about(self, 'AoI needed', 'You have to load Area of Interest layer')
+                attributes_exist = False
+        else:
+            if not hasattr(self, 'pathLine'):
+                QMessageBox.about(self, 'Corridor line needed', 'You have to load Corridor line layer')
+                attributes_exist = False
 
-            if self.tabWidgetBlock:
-                angle = 90 - self.sBdirection.value()
-                if 90 - self.sBdirection.value() < 0:
-                    angle = 90 - self.sBdirection.value() + 360
-                # bounding box equotations and dimensions Dx, Dy
-                a, b, a2, b2, Dx, Dy = bounding_box_at_angle(angle,
-                                                             self.geom_AoI)
-                pc_lay, photo_lay, s_nr, p_nr = projection_centres(
-                    angle, self.geom_AoI, self.crs_vct, a, b, a2, b2, Dx, Dy,
-                    Bx, By, len_along, len_across, x_percent, mult_base, w0,
-                    strip, photo)
+        if attributes_exist:
+            try:
+                gsd = self.doubleSpinBoxGSD.value() / 100
+                max_h = self.doubleSpinBoxMaxHeight.value()
+                min_h = self.doubleSpinBoxMinHeight.value()
+                p0 = self.doubleSpinBoxOverlap.value()
+                q0 = self.doubleSpinBoxSidelap.value()
+                mult_base = self.spinBoxMultipleBase.value()
+                x_percent = self.spinBoxExceedExtremeStrips.value()
 
-            elif self.tabWidgetCorridor:
-                exploded_lines = processing.run("native:explodelines",
-                                                {'INPUT': self.pathLine,
-                                                 'OUTPUT': 'TEMPORARY_OUTPUT'})
-                exp_lines = exploded_lines['OUTPUT']
-                # buffer for each exp_lines
-                buffered_exp_lines = processing.run("native:buffer",
-                                                    {'INPUT': exp_lines, 'DISTANCE': self.dSpinBoxBuffer.value(),
-                                                     'SEGMENTS': 5, 'END_CAP_STYLE': 0, 'JOIN_STYLE': 0,
-                                                     'MITER_LIMIT': 2, 'DISSOLVE': False,
-                                                     'OUTPUT': 'TEMPORARY_OUTPUT'})
-                buff_exp_lines = buffered_exp_lines['OUTPUT']
-                feats_exp_lines = exp_lines.getFeatures()
-                pc_lay_list = []
-                photo_lay_list = []
-                line_buf_list = []
+                # flight height above mean terrain height
+                w = gsd / self.camera.sensor_size * self.camera.focal_length
+                mean_h = (max_h + min_h) / 2
+                # above sea level flight height
+                w0 = w + mean_h
+                if not self.checkBoxIncreaseOverlap.isChecked():
+                    self.p = p0 / 100
+                    self.q = q0 / 100
+                # image length along and across flight direction[m]
+                len_along = self.camera.pixels_along_track * gsd
+                len_across = self.camera.pixels_across_track * gsd
+                # longitudinal base Bx, transverse base By
+                Bx = len_along * (1 - self.p)
+                By = len_across * (1 - self.q)
+                strip = 0
+                photo = 0
 
-                # building projection centres and photos layer for each line
-                for feat_exp in feats_exp_lines:
-                    x_start = feat_exp.geometry().asPolyline()[0].x()
-                    y_start = feat_exp.geometry().asPolyline()[0].y()
-                    x_end = feat_exp.geometry().asPolyline()[1].x()
-                    y_end = feat_exp.geometry().asPolyline()[1].y()
-                    # equation of corridor line
-                    a_line, b_line = line(y_start, y_end, x_start, x_end)
-                    angle = atan(a_line) * 180 / pi
-
-                    if angle < 0:
-                        angle = angle + 180
-
-                    featbuff_exp = buff_exp_lines.getFeature(feat_exp.id())
-                    # geometry object of line buffer
-                    geom_line_buf = featbuff_exp.geometry()
-                    line_buf_list.append(geom_line_buf)
+                if self.tabBlock:
+                    angle = 90 - self.spinBoxDirection.value()
+                    if 90 - self.spinBoxDirection.value() < 0:
+                        angle = 90 - self.spinBoxDirection.value() + 360
+                    # bounding box equotations and dimensions Dx, Dy
                     a, b, a2, b2, Dx, Dy = bounding_box_at_angle(angle,
-                                                                 geom_line_buf)
-                    # projection centres layer and photos layer for given line
+                                                                self.geom_AoI)
                     pc_lay, photo_lay, s_nr, p_nr = projection_centres(
-                        angle, geom_line_buf, self.crs_vct, a, b, a2, b2, Dx,
-                        Dy, Bx, By, len_along, len_across, x_percent,
-                        mult_base, w0, strip, photo)
-                    # adding helping field for function 'alt. for each strip'
-                    pc_lay.startEditing()
-                    pc_lay.addAttribute(QgsField("BuffNr", QVariant.Int))
-                    pc_lay.selectAll()
+                        angle, self.geom_AoI, self.crs_vct, a, b, a2, b2, Dx, Dy,
+                        Bx, By, len_along, len_across, x_percent, mult_base, w0,
+                        strip, photo)
 
-                    for f in range(min(pc_lay.selectedFeatureIds()) - 1, \
-                                   max(pc_lay.selectedFeatureIds()) + 1):
-                        pc_lay.changeAttributeValue(f, 8, feat_exp.id())
+                elif self.tabCorridor:
+                    exploded_lines = processing.run("native:explodelines",
+                                                    {'INPUT': self.pathLine,
+                                                    'OUTPUT': 'TEMPORARY_OUTPUT'})
+                    exp_lines = exploded_lines['OUTPUT']
+                    # buffer for each exp_lines
+                    buffered_exp_lines = processing.run("native:buffer",
+                                                        {'INPUT': exp_lines, 'DISTANCE': self.doubleSpinBoxBuffer.value(),
+                                                        'SEGMENTS': 5, 'END_CAP_STYLE': 0, 'JOIN_STYLE': 0,
+                                                        'MITER_LIMIT': 2, 'DISSOLVE': False,
+                                                        'OUTPUT': 'TEMPORARY_OUTPUT'})
+                    buff_exp_lines = buffered_exp_lines['OUTPUT']
+                    feats_exp_lines = exp_lines.getFeatures()
+                    pc_lay_list = []
+                    photo_lay_list = []
+                    line_buf_list = []
 
-                    pc_lay.commitChanges()
-                    pc_lay_list.append(pc_lay)
-                    photo_lay_list.append(photo_lay)
-                    strip = s_nr
-                    photo = p_nr
+                    # building projection centres and photos layer for each line
+                    for feat_exp in feats_exp_lines:
+                        x_start = feat_exp.geometry().asPolyline()[0].x()
+                        y_start = feat_exp.geometry().asPolyline()[0].y()
+                        x_end = feat_exp.geometry().asPolyline()[1].x()
+                        y_end = feat_exp.geometry().asPolyline()[1].y()
+                        # equation of corridor line
+                        a_line, b_line = line(y_start, y_end, x_start, x_end)
+                        angle = atan(a_line) * 180 / pi
 
-                # merging results for every line
-                merged_pnt_lay = processing.run("native:mergevectorlayers",
-                                                {'LAYERS': pc_lay_list,
-                                                 'CRS': None, 'OUTPUT': 'TEMPORARY_OUTPUT'})
-                pc_lay = merged_pnt_lay['OUTPUT']
-                merged_poly_lay = processing.run("native:mergevectorlayers",
-                                                 {'LAYERS': photo_lay_list, 'CRS': None,
-                                                  'OUTPUT': 'TEMPORARY_OUTPUT'})
-                photo_lay = merged_poly_lay['OUTPUT']
-            s = int(pc_lay.maximumValue(0))
-            theta = fabs(atan2(len_across / 2, len_along / 2))
-            dist = sqrt((len_along / 2) ** 2 + (len_across / 2) ** 2)
-        except:
-            QMessageBox.about(self, 'Error', 'make sure you have provided the' \
-                              + ' data (AoI, camera parameters etc.) correctly')
-            save_error()
-        else:
-            # thread for 'altitude for each strip' option
-            if self.rBstripsAltitude.isChecked():  # or self.rBterrainFollowing.isChecked()
-                if self.tabWidgetCorridor:
-                    self.startWorker_updateAltitude(pc_lay, theta, dist,
-                                                    self.crs_vct, self.DTM, w,
-                                                    photo_lay, s,
-                                                    self.tabWidgetCorridor,
-                                                    line_buf_list)
-                else:
-                    self.startWorker_updateAltitude(pc_lay, theta, dist,
-                                                    self.crs_vct, self.DTM, w,
-                                                    photo_lay, s,
-                                                    self.tabWidgetCorridor,
-                                                    self.geom_AoI)
-                self.pBaccept.setEnabled(False)
-                self.pBacceptControl.setEnabled(False)
+                        if angle < 0:
+                            angle = angle + 180
 
-            elif self.rBterrainFollowing.isChecked():
-                # thread for 'terraing following' option
-                self.startWorker_updateAltitude(pc_lay, theta, dist,
-                                                self.crs_vct, self.DTM,
-                                                w, photo_lay)
-                self.pBaccept.setEnabled(False)
-                self.pBacceptControl.setEnabled(False)
+                        featbuff_exp = buff_exp_lines.getFeature(feat_exp.id())
+                        # geometry object of line buffer
+                        geom_line_buf = featbuff_exp.geometry()
+                        line_buf_list.append(geom_line_buf)
+                        a, b, a2, b2, Dx, Dy = bounding_box_at_angle(angle,
+                                                                    geom_line_buf)
+                        # projection centres layer and photos layer for given line
+                        pc_lay, photo_lay, s_nr, p_nr = projection_centres(
+                            angle, geom_line_buf, self.crs_vct, a, b, a2, b2, Dx,
+                            Dy, Bx, By, len_along, len_across, x_percent,
+                            mult_base, w0, strip, photo)
+                        # adding helping field for function 'alt. for each strip'
+                        pc_lay.startEditing()
+                        pc_lay.addAttribute(QgsField("BuffNr", QVariant.Int))
+                        pc_lay.selectAll()
 
+                        for f in range(min(pc_lay.selectedFeatureIds()) - 1, \
+                                    max(pc_lay.selectedFeatureIds()) + 1):
+                            pc_lay.changeAttributeValue(f, 8, feat_exp.id())
+
+                        pc_lay.commitChanges()
+                        pc_lay_list.append(pc_lay)
+                        photo_lay_list.append(photo_lay)
+                        strip = s_nr
+                        photo = p_nr
+
+                    # merging results for every line
+                    merged_pnt_lay = processing.run("native:mergevectorlayers",
+                                                    {'LAYERS': pc_lay_list,
+                                                    'CRS': None, 'OUTPUT': 'TEMPORARY_OUTPUT'})
+                    pc_lay = merged_pnt_lay['OUTPUT']
+                    merged_poly_lay = processing.run("native:mergevectorlayers",
+                                                    {'LAYERS': photo_lay_list, 'CRS': None,
+                                                    'OUTPUT': 'TEMPORARY_OUTPUT'})
+                    photo_lay = merged_poly_lay['OUTPUT']
+                s = int(pc_lay.maximumValue(0))
+                theta = fabs(atan2(len_across / 2, len_along / 2))
+                dist = sqrt((len_along / 2) ** 2 + (len_across / 2) ** 2)
+            except:
+                QMessageBox.about(self, 'Error', 'Flight design failed')
+                save_error()
             else:
-                # delete redundant fields
-                pc_lay.startEditing()
-                pc_lay.deleteAttributes([8, 9, 10])
-                pc_lay.commitChanges()
-                photo_lay.startEditing()
-                photo_lay.deleteAttributes([2, 3])
-                photo_lay.commitChanges()
+                if self.comboBoxAltitudeType.currentText() == 'Separate altitude for each strip':
+                    if self.tabCorridor:
+                        self.startWorker_updateAltitude(pc_lay, theta, dist,
+                                                        self.crs_vct, self.DTM, w,
+                                                        photo_lay, s,
+                                                        self.tabCorridor,
+                                                        line_buf_list)
+                    else:
+                        self.startWorker_updateAltitude(pc_lay, theta, dist,
+                                                        self.crs_vct, self.DTM, w,
+                                                        photo_lay, s,
+                                                        self.tabCorridor,
+                                                        self.geom_AoI)
+                    self.pushButtonRunDesign.setEnabled(False)
+                    self.pushButtonRunControl.setEnabled(False)
 
-                # change layers style
-                renderer = photo_lay.renderer()
-                symbol = renderer.symbol()
-                prop = {'color': '200,200,200,30', 'color_border': '#000000',
-                        'width_border': '0.2'}
-                my_symbol = symbol.createSimple(prop)
-                renderer.setSymbol(my_symbol)
-                photo_lay.triggerRepaint()
-                photo_lay.setName('photos')
-                pc_lay.setName('projection centres')
+                elif self.comboBoxAltitudeType.currentText() == 'Terrain following':
+                    self.startWorker_updateAltitude(pc_lay, theta, dist,
+                                                    self.crs_vct, self.DTM,
+                                                    w, photo_lay)
+                    self.pushButtonRunDesign.setEnabled(False)
+                    self.pushButtonRunControl.setEnabled(False)
 
-                # add layers to canvas
-                QgsProject.instance().addMapLayer(photo_lay)
-                QgsProject.instance().addMapLayer(pc_lay)
+                else:
+                    # delete redundant fields
+                    pc_lay.startEditing()
+                    pc_lay.deleteAttributes([8, 9, 10])
+                    pc_lay.commitChanges()
+                    photo_lay.startEditing()
+                    photo_lay.deleteAttributes([2, 3])
+                    photo_lay.commitChanges()
+
+                    # change layers style
+                    renderer = photo_lay.renderer()
+                    symbol = renderer.symbol()
+                    prop = {'color': '200,200,200,30', 'color_border': '#000000',
+                            'width_border': '0.2'}
+                    my_symbol = symbol.createSimple(prop)
+                    renderer.setSymbol(my_symbol)
+                    photo_lay.triggerRepaint()
+                    photo_lay.setName('photos')
+                    pc_lay.setName('projection centres')
+
+                    # add layers to canvas
+                    QgsProject.instance().addMapLayer(photo_lay)
+                    QgsProject.instance().addMapLayer(pc_lay)
 
     @pyqtSlot()
-    def on_pBacceptControl_clicked(self):
+    def on_pushButtonRunControl_clicked(self):
         """Push Button to execute all control activites."""
-        try:
-            # read all necessary parameters
-            proj_centres = self.pcMapLayCombB.currentLayer()
-            h_field = self.altitudeFieldComboBox.currentField()
-            o_field = self.omegaFieldComboBox.currentField()
-            p_field = self.phiFieldComboBox.currentField()
-            k_field = self.kappaFieldComboBox.currentField()
-            threshold = self.dSpinBoxThreshold.value()
-            if not self.crs_rst or not h_field or not o_field or not p_field \
-                    or not k_field:
-                raise NameError
-        except (AttributeError, ValueError, NameError):
-            QMessageBox.about(self, 'Error', 'Make sure you have provided the'
-                                             ' data (DTM, projection centers,'
-                                             ' camera parameters) correctly')
-            save_error()
-        else:
-            # start worker to move hard task into a separate thread
-            self.startWorker_control(pnt_lay=proj_centres, h=h_field,
-                                     o=o_field, p=p_field, k=k_field,
-                                     camera=self.camera, crs_vct=self.crs_vct_ctrl,
-                                     crs_rst=self.crs_rst, DTM=self.raster,
-                                     overlap_bool=self.cBoverlapPict.isChecked(),
-                                     gsd_bool=self.cBgsdMap.isChecked(),
-                                     footprint_bool=self.cBfootprint.isChecked(),
-                                     t=threshold)
-            # disable GUI elements to prevent thread from starting
-            # a second time
-            self.pBacceptControl.setEnabled(False)
-            self.pBaccept.setEnabled(False)
+        proj_centres = self.mMapLayerComboBoxProjectionCentres.currentLayer()
+        h_field = self.mFieldComboBoxAltControl.currentField()
+        o_field = self.mFieldComboBoxOmega.currentField()
+        p_field = self.mFieldComboBoxPhi.currentField()
+        k_field = self.mFieldComboBoxKappa.currentField()
+
+        attributes_exist = True
+        if not hasattr(self, 'DTM'):
+            QMessageBox.about(self, 'DTM needed', 'You have to load DTM layer')
+            attributes_exist = False
+        elif not proj_centres:
+            QMessageBox.about(self, 'Error', 'You have to load Projection centres layer')
+            attributes_exist = False
+        elif not h_field:
+            QMessageBox.about(self, 'Error', 'You have to indicate Altitude field')
+            attributes_exist = False
+        elif not o_field:
+            QMessageBox.about(self, 'Error', 'You have to indicate Omega field')
+            attributes_exist = False
+        elif not p_field:
+            QMessageBox.about(self, 'Error', 'You have to indicate Phi field')
+            attributes_exist = False
+        elif not k_field:
+            QMessageBox.about(self, 'Error', 'You have to indicate Kappa field')
+            attributes_exist = False
+
+        if attributes_exist:
+            try:
+                threshold = self.doubleSpinBoxIterationThreshold.value()
+                self.startWorker_control(pnt_lay=proj_centres, h=h_field,
+                                        o=o_field, p=p_field, k=k_field,
+                                        camera=self.camera, crs_vct=self.crs_vct_ctrl,
+                                        crs_rst=self.crs_rst, DTM=self.raster,
+                                        overlap_bool=self.checkBoxOverlapImages.isChecked(),
+                                        gsd_bool=self.checkBoxGSDmap.isChecked(),
+                                        footprint_bool=self.checkBoxFootprint.isChecked(),
+                                        t=threshold)
+                # disable GUI elements to prevent thread from starting
+                # a second time
+                self.pushButtonRunControl.setEnabled(False)
+                self.pushButtonRunDesign.setEnabled(False)
+            except:
+                QMessageBox.about(self, 'Error', 'Quality control failed')
+                save_error()
 
     @pyqtSlot()
-    def on_pBaddCamera_clicked(self):
+    def on_pushButtonSaveCamera_clicked(self):
         """Push Button to add camera to camera list."""
         try:
             camera_name, pressed_ok = QInputDialog.getText(self, 'Save camera',
@@ -628,14 +755,14 @@ class FlightPlannerDialog(QtWidgets.QDialog, FORM_CLASS):
                                     self.spinBoxPixelsAcrossTrack.value())
                 new_camera.save()
                 self.cameras.append(new_camera)
-                self.combBcam.addItem(new_camera.name)
-                self.combBcam.setCurrentText(self.cameras[-1].name)
+                self.comboBoxCamera.addItem(new_camera.name)
+                self.comboBoxCamera.setCurrentText(self.cameras[-1].name)
         except:
             QMessageBox.about(self, 'Error', 'Saving camera failed')
             save_error()
 
     @pyqtSlot()
-    def on_pBdelCamera_clicked(self):
+    def on_pushButtonDeleteCamera_clicked(self):
         """Push Button to delete camera from camera list."""
         try:
             camera_names = [camera.name for camera in self.cameras]
@@ -646,20 +773,20 @@ class FlightPlannerDialog(QtWidgets.QDialog, FORM_CLASS):
                 selected_camera = next(camera for camera in self.cameras if camera.name == option)
                 selected_camera.delete()
                 self.cameras.remove(selected_camera)
-                selected_camera_index = self.combBcam.findText(selected_camera.name)
-                self.combBcam.removeItem(selected_camera_index)
+                selected_camera_index = self.comboBoxCamera.findText(selected_camera.name)
+                self.comboBoxCamera.removeItem(selected_camera_index)
 
-                if self.combBcam.currentText() in camera_names:
-                    self.doubleSpinBoxFocalLength.setValue(self.cameras[self.combBcam.currentIndex()].focal_length * 1_000)
-                    self.doubleSpinBoxSensorSize.setValue(self.cameras[self.combBcam.currentIndex()].sensor_size * 1_000_000)
-                    self.spinBoxPixelsAlongTrack.setValue(self.cameras[self.combBcam.currentIndex()].pixels_along_track)
-                    self.spinBoxPixelsAcrossTrack.setValue(self.cameras[self.combBcam.currentIndex()].pixels_across_track)
+                if self.comboBoxCamera.currentText() in camera_names:
+                    self.doubleSpinBoxFocalLength.setValue(self.cameras[self.comboBoxCamera.currentIndex()].focal_length * 1_000)
+                    self.doubleSpinBoxSensorSize.setValue(self.cameras[self.comboBoxCamera.currentIndex()].sensor_size * 1_000_000)
+                    self.spinBoxPixelsAlongTrack.setValue(self.cameras[self.comboBoxCamera.currentIndex()].pixels_along_track)
+                    self.spinBoxPixelsAcrossTrack.setValue(self.cameras[self.comboBoxCamera.currentIndex()].pixels_across_track)
                 else:
                     self.doubleSpinBoxFocalLength.setValue(self.doubleSpinBoxFocalLength.minimum())
                     self.doubleSpinBoxSensorSize.setValue(self.doubleSpinBoxSensorSize.minimum())
                     self.spinBoxPixelsAlongTrack.setValue(self.spinBoxPixelsAlongTrack.minimum())
                     self.spinBoxPixelsAcrossTrack.setValue(self.spinBoxPixelsAcrossTrack.minimum())
-                    self.combBcam.addItem('No cameras listed')
+                    self.comboBoxCamera.addItem('No cameras listed')
         except:
             QMessageBox.about(self, 'Error', 'Deleting camera failed')
             save_error()
