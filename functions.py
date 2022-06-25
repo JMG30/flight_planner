@@ -423,6 +423,7 @@ def projection_centres(alpha, geometry, crs_vect, a_ll, b_ll, a_l_, b_l_,
                       QgsField("X [m]", QVariant.Double),
                       QgsField("Y [m]", QVariant.Double),
                       QgsField("Alt. ASL [m]", QVariant.Double),
+                      QgsField("Alt. AGL [m]", QVariant.Double),
                       QgsField("Omega [deg]", QVariant.Double),
                       QgsField("Phi [deg]", QVariant.Double),
                       QgsField("Kappa [deg]", QVariant.Double)])
@@ -492,7 +493,7 @@ def projection_centres(alpha, geometry, crs_vect, a_ll, b_ll, a_l_, b_l_,
                 pnt = QgsPointXY(xi, yi)
                 feat_pnt.setGeometry(QgsGeometry.fromPointXY(pnt))
                 feat_pnt.setAttributes([s_nr, p_nr, round(xi, 2), round(yi, 2),
-                                        round(H, 2), 0, 0, kappa])
+                                        round(H, 2), None, 0, 0, kappa])
                 pr.addFeature(feat_pnt)
                 pc_layer.updateExtents()
                 feat_poly.setGeometry(geom_poly)

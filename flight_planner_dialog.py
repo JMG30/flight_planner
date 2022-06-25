@@ -36,7 +36,8 @@ from qgis.core import (
     QgsField,
     QgsFieldProxyModel,
     QgsMapLayerProxyModel,
-    QgsProject
+    QgsProject,
+    QgsPointXY
 )
 
 from .camera import Camera
@@ -87,8 +88,8 @@ class FlightPlannerDialog(QtWidgets.QDialog, FORM_CLASS):
         self.mMapLayerComboBoxAoI.setFilters(QgsMapLayerProxyModel.PolygonLayer)
         self.mMapLayerComboBoxCorridor.setFilters(QgsMapLayerProxyModel.LineLayer)
 
-        self.comboBoxAltitudeType.addItems(["One altitude for entire flight",
-            "Separate altitude for each strip",
+        self.comboBoxAltitudeType.addItems(["One altitude ASL for entire flight",
+            "Separate altitude ASL for each strip",
             "Terrain following"])
 
         # Set up ComboBox of camera
@@ -134,28 +135,10 @@ class FlightPlannerDialog(QtWidgets.QDialog, FORM_CLASS):
         self.thread = thread
         self.worker = worker
 
-    def startWorker_updateAltitude(self, pnt_lay, theta, dist, crs_vct, DTM, w,
-                                   layer_pol, s=None, tabWidgetBlockCorridor=None,
-                                   geom=None):
+    def startWorker_updateAltitude(self, **params):
         """Start a worker for update altitude of flight in 'altitude for
         each strip' or 'terraing following' mode."""
-        if self.comboBoxAltitudeType.currentText() == 'Separate altitude for each strip':
-            if tabWidgetBlockCorridor:
-                worker = Worker(pointLayer=pnt_lay, theta=theta, distance=dist,
-                                crsVectorLayer=crs_vct, DTM=DTM, height=w,
-                                strips=s, tabWidg=tabWidgetBlockCorridor,
-                                LineRangeList=geom, polygonLayer=layer_pol)
-            else:
-                worker = Worker(pointLayer=pnt_lay, theta=theta, distance=dist,
-                                crsVectorLayer=crs_vct, DTM=DTM, height=w,
-                                strips=s, tabWidg=tabWidgetBlockCorridor, Range=geom,
-                                polygonLayer=layer_pol)
-
-        elif self.comboBoxAltitudeType.currentText() == 'Terrain following':
-            worker = Worker(pointLayer=pnt_lay, theta=theta, distance=dist,
-                            crsVectorLayer=crs_vct, DTM=DTM, height=w,
-                            polygonLayer=layer_pol)
-
+        worker = Worker(**params)
         # Create a new worker instance
         # Start the worker in a new thread
         thread = QThread(self)
@@ -166,7 +149,7 @@ class FlightPlannerDialog(QtWidgets.QDialog, FORM_CLASS):
         worker.enabled.connect(self.pushButtonRunDesign.setEnabled)
         worker.enabled.connect(self.pushButtonRunControl.setEnabled)
 
-        if self.comboBoxAltitudeType.currentText() == 'Separate altitude for each strip':
+        if self.comboBoxAltitudeType.currentText() == 'Separate altitude ASL for each strip':
             thread.started.connect(worker.run_altitudeStrip)
         elif self.comboBoxAltitudeType.currentText() == 'Terrain following':
             thread.started.connect(worker.run_followingTerrain)
@@ -250,16 +233,16 @@ class FlightPlannerDialog(QtWidgets.QDialog, FORM_CLASS):
 
     def on_comboBoxAltitudeType_activated(self, text):
         if isinstance(text, str):
-            if text in ['Separate altitude for each strip', 'Terrain following'] \
+            if text in ['Separate altitude ASL for each strip', 'Terrain following'] \
                 and not self.mMapLayerComboBoxDTM.currentLayer():
                 QMessageBox.about(self, 'DTM needed', 'You must select DTM to use this option')
-                self.comboBoxAltitudeType.setCurrentText("One altitude for entire flight")
+                self.comboBoxAltitudeType.setCurrentText("One altitude ASL for entire flight")
             elif text == 'Terrain following' and self.mMapLayerComboBoxDTM.currentLayer():
                 self.doubleSpinBoxSlopeThreshold.setEnabled(True)
             else:
                 self.doubleSpinBoxSlopeThreshold.setEnabled(False)
 
-            if self.comboBoxAltitudeType.currentText() != 'One altitude for entire flight':
+            if self.comboBoxAltitudeType.currentText() != 'One altitude ASL for entire flight':
                 self.checkBoxIncreaseOverlap.setChecked(False)
                 self.checkBoxIncreaseOverlap.setEnabled(False)
                 self.pushButtonGetHeights.setEnabled(False)
@@ -270,6 +253,12 @@ class FlightPlannerDialog(QtWidgets.QDialog, FORM_CLASS):
                 self.pushButtonGetHeights.setEnabled(True)
                 self.doubleSpinBoxMaxHeight.setEnabled(True)
                 self.doubleSpinBoxMinHeight.setEnabled(True)
+
+            if self.comboBoxAltitudeType.currentText() == 'Terrain following':
+              self.radioButtonAltAGL.setEnabled(True)
+            else:
+               self.radioButtonAltAGL.setEnabled(False)
+               self.radioButtonGSD.setChecked(True)
 
     def on_doubleSpinBoxFocalLength_valueChanged(self):
         self.camera.focal_length = self.doubleSpinBoxFocalLength.value() / 1_000
@@ -521,7 +510,7 @@ class FlightPlannerDialog(QtWidgets.QDialog, FORM_CLASS):
     def on_pushButtonRunDesign_clicked(self):
         """Push Button to make a flight plan."""
         attributes_exist = True
-        if self.comboBoxAltitudeType.currentText() in ['Separate altitude for each strip', 'Terrain following']:
+        if self.comboBoxAltitudeType.currentText() in ['Separate altitude ASL for each strip', 'Terrain following']:
             if not hasattr(self, 'DTM'):
                 QMessageBox.about(self, 'DTM needed', 'You have to load DTM layer')
                 attributes_exist = False
@@ -545,11 +534,13 @@ class FlightPlannerDialog(QtWidgets.QDialog, FORM_CLASS):
                 mult_base = self.spinBoxMultipleBase.value()
                 x_percent = self.spinBoxExceedExtremeStrips.value()
 
-                # flight height above mean terrain height
-                w = gsd / self.camera.sensor_size * self.camera.focal_length
-                mean_h = (max_h + min_h) / 2
-                # above sea level flight height
-                w0 = w + mean_h
+                avg_terrain_height = (max_h + min_h) / 2
+                if self.radioButtonGSD.isChecked():
+                    altitude_AGL = gsd / self.camera.sensor_size * self.camera.focal_length
+                elif self.radioButtonAltAGL.isChecked():
+                    altitude_AGL = self.doubleSpinBoxAltAGL.value()
+                altitude_ASL = avg_terrain_height + altitude_AGL
+
                 if not self.checkBoxIncreaseOverlap.isChecked():
                     self.p = p0 / 100
                     self.q = q0 / 100
@@ -571,7 +562,7 @@ class FlightPlannerDialog(QtWidgets.QDialog, FORM_CLASS):
                                                                 self.geom_AoI)
                     pc_lay, photo_lay, s_nr, p_nr = projection_centres(
                         angle, self.geom_AoI, self.crs_vct, a, b, a2, b2, Dx, Dy,
-                        Bx, By, len_along, len_across, x_percent, mult_base, w0,
+                        Bx, By, len_along, len_across, x_percent, mult_base, altitude_ASL,
                         strip, photo)
 
                 elif self.tabCorridor:
@@ -614,7 +605,7 @@ class FlightPlannerDialog(QtWidgets.QDialog, FORM_CLASS):
                         pc_lay, photo_lay, s_nr, p_nr = projection_centres(
                             angle, geom_line_buf, self.crs_vct, a, b, a2, b2, Dx,
                             Dy, Bx, By, len_along, len_across, x_percent,
-                            mult_base, w0, strip, photo)
+                            mult_base, altitude_ASL, strip, photo)
                         # adding helping field for function 'alt. for each strip'
                         pc_lay.startEditing()
                         pc_lay.addAttribute(QgsField("BuffNr", QVariant.Int))
@@ -622,7 +613,7 @@ class FlightPlannerDialog(QtWidgets.QDialog, FORM_CLASS):
 
                         for f in range(min(pc_lay.selectedFeatureIds()) - 1, \
                                     max(pc_lay.selectedFeatureIds()) + 1):
-                            pc_lay.changeAttributeValue(f, 8, feat_exp.id())
+                            pc_lay.changeAttributeValue(f, 9, feat_exp.id())
 
                         pc_lay.commitChanges()
                         pc_lay_list.append(pc_lay)
@@ -646,33 +637,71 @@ class FlightPlannerDialog(QtWidgets.QDialog, FORM_CLASS):
                 QMessageBox.about(self, 'Error', 'Flight design failed')
                 save_error()
             else:
-                if self.comboBoxAltitudeType.currentText() == 'Separate altitude for each strip':
+                if self.comboBoxAltitudeType.currentText() == 'Separate altitude ASL for each strip':
                     if self.tabCorridor:
-                        self.startWorker_updateAltitude(pc_lay, theta, dist,
-                                                        self.crs_vct, self.DTM, w,
-                                                        photo_lay, s,
-                                                        self.tabCorridor,
-                                                        line_buf_list)
+                        self.startWorker_updateAltitude(pointLayer=pc_lay,
+                                                        theta=theta, 
+                                                        distance=dist,
+                                                        crsVectorLayer=self.crs_vct,
+                                                        crsRasterLayer=self.crs_rst,
+                                                        DTM=self.DTM, 
+                                                        altitude_AGL=altitude_AGL,
+                                                        polygonLayer=photo_lay,
+                                                        strips=s,
+                                                        tabWidg=self.tabCorridor,
+                                                        LineRangeList=line_buf_list)
                     else:
-                        self.startWorker_updateAltitude(pc_lay, theta, dist,
-                                                        self.crs_vct, self.DTM, w,
-                                                        photo_lay, s,
-                                                        self.tabCorridor,
-                                                        self.geom_AoI)
+                        self.startWorker_updateAltitude(pointLayer=pc_lay,
+                                                        theta=theta,
+                                                        distance=dist,
+                                                        crsVectorLayer=self.crs_vct,
+                                                        crsRasterLayer=self.crs_rst,
+                                                        DTM=self.DTM,
+                                                        altitude_AGL=altitude_AGL,
+                                                        polygonLayer=photo_lay,
+                                                        strips=s,
+                                                        tabWidg=self.tabCorridor,
+                                                        Range=self.geom_AoI)
                     self.pushButtonRunDesign.setEnabled(False)
                     self.pushButtonRunControl.setEnabled(False)
 
                 elif self.comboBoxAltitudeType.currentText() == 'Terrain following':
-                    self.startWorker_updateAltitude(pc_lay, theta, dist,
-                                                    self.crs_vct, self.DTM,
-                                                    w, photo_lay)
+                    self.startWorker_updateAltitude(pointLayer=pc_lay,
+                                                    theta=theta,
+                                                    distance=dist,
+                                                    crsVectorLayer=self.crs_vct,
+                                                    crsRasterLayer=self.crs_rst, 
+                                                    DTM=self.DTM,
+                                                    altitude_AGL=altitude_AGL,
+                                                    polygonLayer=photo_lay,
+                                                    )
                     self.pushButtonRunDesign.setEnabled(False)
                     self.pushButtonRunControl.setEnabled(False)
 
                 else:
+                    if hasattr(self, 'DTM'):
+                        if self.crs_rst != self.crs_vct:
+                            transf_vct_rst = Transformer.from_crs(self.crs_vct,
+                                                                self.crs_rst,
+                                                                always_xy=True)
+                        feats = pc_lay.getFeatures()
+                        for f in feats:
+                            # projection center coordinates
+                            x = f.geometry().asPoint().x()
+                            y = f.geometry().asPoint().y()
+                            if self.crs_rst != self.crs_vct:
+                                x, y = transf_coord(transf_vct_rst, x, y)
+
+                            altitude_ASL = f.attribute('Alt. ASL [m]')
+                            terrain_height, res = self.DTM.dataProvider().sample(QgsPointXY(x, y,), 1)
+                            altitude_AGL = altitude_ASL - terrain_height
+                            pc_lay.startEditing()
+                            pc_lay.changeAttributeValue(f.id(), 5, round(altitude_AGL, 2))
+                            pc_lay.commitChanges()
+
                     # delete redundant fields
                     pc_lay.startEditing()
-                    pc_lay.deleteAttributes([8, 9, 10])
+                    pc_lay.deleteAttributes([9, 10, 11])
                     pc_lay.commitChanges()
                     photo_lay.startEditing()
                     photo_lay.deleteAttributes([2, 3])

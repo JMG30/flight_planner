@@ -70,7 +70,8 @@ class Worker(QObject):
         self.threshold = data.get('threshold')
         self.theta = data.get('theta')
         self.dist = data.get('distance')
-        self.w = data.get('height')
+        self.altitude_AGL = data.get('altitude_AGL')
+        self.altitude_ASL = data.get('altitude_ASL')
         self.s = data.get('strips')
         self.tab_widg_cor = data.get('tabWidg')
         self.g_line_list = data.get('LineRangeList')
@@ -343,10 +344,10 @@ class Worker(QObject):
     def run_followingTerrain(self):
         result = []
         try:
-            photo_layer = QgsVectorLayer("Polygon?crs=" + str(self.crs_vct),
-                                         "photo", "memory")
-            provPhoto = photo_layer.dataProvider()
-            featPhoto = QgsFeature()
+            if self.crs_rst != self.crs_vct:
+                transf_vct_rst = Transformer.from_crs(self.crs_vct,
+                                                      self.crs_rst,
+                                                      always_xy=True)
             feat_count = self.layer.featureCount()
             progress_c = 0
             step = feat_count // 1000
@@ -356,33 +357,19 @@ class Worker(QObject):
                     # kill request received, exit loop early
                     break
                 # projection center coordinates
-                xg = f.geometry().asPoint().x()
-                yg = f.geometry().asPoint().y()
-                kappa = float(f.attribute('Kappa [deg]')) * pi / 180
-                # range of photo
-                x1 = xg + cos(kappa + self.theta - pi) * self.dist
-                y1 = yg + sin(kappa + self.theta - pi) * self.dist
-                x2 = xg + cos(kappa - self.theta + pi) * self.dist
-                y2 = yg + sin(kappa - self.theta + pi) * self.dist
-                x3 = xg + cos(kappa + self.theta) * self.dist
-                y3 = yg + sin(kappa + self.theta) * self.dist
-                x4 = xg + cos(kappa - self.theta) * self.dist
-                y4 = yg + sin(kappa - self.theta) * self.dist
-                photo = [QgsPointXY(x1, y1), QgsPointXY(x2, y2),
-                         QgsPointXY(x3, y3), QgsPointXY(x4, y4)]
-                geomPhoto = QgsGeometry.fromPolygonXY([photo])
-                featPhoto.setGeometry(geomPhoto)
-                provPhoto.addFeature(featPhoto)
-                # min and max height DTM in the range of photo
-                hMin, hMax = minmaxheight(photo_layer, self.DTM)
-                mean_h = (hMax + hMin) / 2
-                w0 = self.w + mean_h
+                x = f.geometry().asPoint().x()
+                y = f.geometry().asPoint().y()
+                if self.crs_rst != self.crs_vct:
+                    x, y = transf_coord(transf_vct_rst, x, y)
+
+                terrain_height, res = self.DTM.dataProvider().sample(QgsPointXY(x, y,), 1)
+                altitude_ASL = self.altitude_AGL + terrain_height
+                altitude_AGL = self.altitude_AGL
+
                 self.layer.startEditing()
-                self.layer.changeAttributeValue(f.id(), 4, round(w0, 2))
+                self.layer.changeAttributeValue(f.id(), 4, round(altitude_ASL, 2))
+                self.layer.changeAttributeValue(f.id(), 5, round(altitude_AGL, 2))
                 self.layer.commitChanges()
-                photo_layer.startEditing()
-                photo_layer.deleteFeature(f.id())
-                photo_layer.commitChanges()
                 # increment progress
                 progress_c += 1
                 if step == 0 or progress_c % step == 0:
@@ -391,7 +378,7 @@ class Worker(QObject):
                 self.progress.emit(100)
                 # deleting reduntant fields
                 self.layer.startEditing()
-                self.layer.deleteAttributes([8, 9, 10])
+                self.layer.deleteAttributes([9, 10, 11])
                 self.layer.commitChanges()
                 self.layer_pol.startEditing()
                 self.layer_pol.deleteAttributes([2, 3])
@@ -421,6 +408,11 @@ class Worker(QObject):
             progress_c = 0
             step = self.s // 1000
             feat_strip = QgsFeature()
+
+            if self.crs_rst != self.crs_vct:
+                transf_vct_rst = Transformer.from_crs(self.crs_vct,
+                                                      self.crs_rst,
+                                                      always_xy=True)
             for t in range(1, self.s + 1):
 
                 if self.killed is True:
@@ -474,8 +466,8 @@ class Worker(QObject):
                 prov_com.addFeature(feat_strip)
 
                 h_min, h_max = minmaxheight(common_lay, self.DTM)
-                mean_h = h_max - (h_max - h_min) / 3
-                w0 = self.w + mean_h
+                avg_terrain_height = h_max - (h_max - h_min) / 3
+                altitude_ASL = self.altitude_AGL + avg_terrain_height
 
                 # update altitude flight
                 self.layer.startEditing()
@@ -484,7 +476,16 @@ class Worker(QObject):
                     ph_nr_iterator = self.layer.getFeatures('"Photo Number" = ' + str(photo_nr))
                     for f in ph_nr_iterator:
                         ph_nr = f.id()
-                    self.layer.changeAttributeValue(ph_nr, 4, round(w0, 2))
+
+                    x = f.geometry().asPoint().x()
+                    y = f.geometry().asPoint().y()
+                    if self.crs_rst != self.crs_vct:
+                        x, y = transf_coord(transf_vct_rst, x, y)
+
+                    terrain_height, res = self.DTM.dataProvider().sample(QgsPointXY(x, y,), 1)
+                    altitude_AGL = altitude_ASL - terrain_height
+                    self.layer.changeAttributeValue(ph_nr, 5, round(altitude_AGL, 2))
+                    self.layer.changeAttributeValue(ph_nr, 4, round(altitude_ASL, 2))
                 self.layer.commitChanges()
                 # increment progress
                 progress_c += 1
@@ -495,7 +496,7 @@ class Worker(QObject):
                 # deleting redundant fields
                 if self.tab_widg_cor:
                     self.layer.startEditing()
-                    self.layer.deleteAttributes([8, 9, 10])
+                    self.layer.deleteAttributes([9, 10, 11])
                     self.layer.commitChanges()
                     self.layer_pol.startEditing()
                     self.layer_pol.deleteAttributes([2, 3])
