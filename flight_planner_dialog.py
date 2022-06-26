@@ -110,16 +110,10 @@ class FlightPlannerDialog(QtWidgets.QDialog, FORM_CLASS):
                             pixels_along_track=self.spinBoxPixelsAlongTrack.value(),
                             pixels_across_track=self.spinBoxPixelsAcrossTrack.value())
 
-    def startWorker_control(self, pnt_lay, h, o, p, k, camera,
-                            crs_vct, crs_rst, DTM, overlap_bool,
-                            gsd_bool, footprint_bool, t):
+    def startWorker_control(self, **params):
         """Start worker for control module of plugin."""
         # Create a new worker instance
-        worker = Worker(pointLayer=pnt_lay, hField=h, omegaField=o,
-                        phiField=p, kappaField=k, camera=camera,
-                        crsVectorLayer=crs_vct, crsRasterLayer=crs_rst,
-                        DTM=DTM, overlap=overlap_bool, gsd=gsd_bool,
-                        footprint=footprint_bool, threshold=t)
+        worker = Worker(**params)
 
         self.pushButtonStopControl.clicked.connect(worker.kill)
         # Start the worker in a new thread
@@ -754,14 +748,21 @@ class FlightPlannerDialog(QtWidgets.QDialog, FORM_CLASS):
         if attributes_exist:
             try:
                 threshold = self.doubleSpinBoxIterationThreshold.value()
-                self.startWorker_control(pnt_lay=proj_centres, h=h_field,
-                                        o=o_field, p=p_field, k=k_field,
-                                        camera=self.camera, crs_vct=self.crs_vct_ctrl,
-                                        crs_rst=self.crs_rst, DTM=self.raster,
-                                        overlap_bool=self.checkBoxOverlapImages.isChecked(),
-                                        gsd_bool=self.checkBoxGSDmap.isChecked(),
-                                        footprint_bool=self.checkBoxFootprint.isChecked(),
-                                        t=threshold)
+                self.startWorker_control(pointLayer=proj_centres,
+                                        hField=h_field,
+                                        omegaField=o_field,
+                                        phiField=p_field,
+                                        kappaField=k_field,
+                                        camera=self.camera,
+                                        crsVectorLayer=self.crs_vct_ctrl,
+                                        crsRasterLayer=self.crs_rst,
+                                        DTM=self.DTM,
+                                        raster = self.raster,
+                                        overlap=self.checkBoxOverlapImages.isChecked(),
+                                        gsd=self.checkBoxGSDmap.isChecked(),
+                                        footprint=self.checkBoxFootprint.isChecked(),
+                                        threshold=threshold,
+                                        height_is_ASL = self.radioButtonSeaLevel.isChecked())
                 # disable GUI elements to prevent thread from starting
                 # a second time
                 self.pushButtonRunControl.setEnabled(False)

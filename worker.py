@@ -57,8 +57,10 @@ class Worker(QObject):
         self.layer = data.get('pointLayer')
         self.crs_vct = data.get('crsVectorLayer')
         self.DTM = data.get('DTM')
+        self.raster = data.get('raster')
         self.layer_pol = data.get('polygonLayer')
         self.crs_rst = data.get('crsRasterLayer')
+        self.height_is_ASL = data.get('height_is_ASL')
         self.height_f = data.get('hField')
         self.omega_f = data.get('omegaField')
         self.phi_f = data.get('phiField')
@@ -94,13 +96,13 @@ class Worker(QObject):
                 transf_vct_rst = None
                 transf_rst_vct = None
 
-            Z_srtm = self.DTM.GetRasterBand(1).ReadAsArray()
-            nodata = self.DTM.GetRasterBand(1).GetNoDataValue()
+            Z_srtm = self.raster.GetRasterBand(1).ReadAsArray()
+            nodata = self.raster.GetRasterBand(1).GetNoDataValue()
             rst_array = np.ma.masked_equal(Z_srtm, nodata)
             Z_min = np.nanmin(rst_array)
 
             uplx_r, xres_r, xskew_r, \
-            uply_r, yskew_r, yres_r = self.DTM.GetGeoTransform()
+            uply_r, yskew_r, yres_r = self.raster.GetGeoTransform()
 
             # calculating metric resolution if crs is geographic
             if QgsCoordinateReferenceSystem(self.crs_rst).isGeographic():
@@ -138,12 +140,19 @@ class Worker(QObject):
                 Xs = feature.geometry().asPoint().x()
                 Ys = feature.geometry().asPoint().y()
                 Zs = feature.attribute(self.height_f)
+                if not self.height_is_ASL:
+                    x, y = Xs, Ys
+                    if self.crs_rst != self.crs_vct:
+                        x, y = transf_coord(transf_vct_rst, Xs, Ys)
+                    terrain_height, res = self.DTM.dataProvider().sample(QgsPointXY(x, y,), 1)
+                    Zs = feature.attribute(self.height_f) + terrain_height
+
                 omega = feature.attribute(self.omega_f)
                 phi = feature.attribute(self.phi_f)
                 kappa = feature.attribute(self.kappa_f)
 
                 R = rotation_matrix(omega, phi, kappa)
-                clipped_DTM, clipped_geot = clip_raster(self.DTM, xyf_corners,
+                clipped_DTM, clipped_geot = clip_raster(self.raster, xyf_corners,
                                                         R, Xs, Ys, Zs, Z_min,
                                                         transf_vct_rst,
                                                         self.crs_rst,
