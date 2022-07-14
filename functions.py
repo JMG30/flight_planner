@@ -8,6 +8,7 @@ import time
 import traceback
 from math import (
     acos,
+    atan,
     atan2,
     ceil,
     cos,
@@ -356,10 +357,95 @@ def bounding_box_at_angle(alpha, geom):
     return a_ll, b_ll, a_l_, b_l_, Dx, Dy
 
 
-def projection_centres(alpha, geometry, crs_vect, a_ll, b_ll, a_l_, b_l_,
-                       Dx, Dy, Bx, By, Lx, Ly, x, m, H, strip_nr, photo_nr):
-    """Create QgsVectorLayer of projection centers with attribute table
-    and QgsVectorLayer range of photos at average terrain height."""
+def forward(strip, photo, nr_photos_in_strip):
+    """Return dictionary with strip and photo numbers
+    for the forward direction of corridor flight."""
+    strips_forward = {}
+    for seg, n in nr_photos_in_strip.items():
+        photos = []
+        for _ in range(1, n + 1):
+            photos.append(photo)
+            photo += 1
+        strips_forward[seg] = {strip: photos}
+        strip += 1
+
+    return strip, photo, strips_forward
+
+
+def backward(strip, photo, nr_photos_in_strip):
+    """Return dictionary with strip and photo numbers
+    for the backward direction of corridor flight."""
+    strips_backward = {}
+    for seg, n in reversed(nr_photos_in_strip.items()):
+        photos = []
+        for _ in range(1, n + 1):
+            photos.append(photo)
+            photo += 1
+        strips_backward[seg] = {strip: photos[::-1]}
+        strip += 1
+
+    return strip, photo, strips_backward
+
+
+def corridor_flight_numbering(feats_exp_lines, buff_exp_lines, Bx, By,
+    len_across, mult_base, x_percent, segments):
+    """Return dictionary with number of strips and photos
+    for each segment of corridor flight."""
+    nr_photos_in_strip = {}
+    for feat_exp in feats_exp_lines:
+        x_start = feat_exp.geometry().asPolyline()[0].x()
+        y_start = feat_exp.geometry().asPolyline()[0].y()
+        x_end = feat_exp.geometry().asPolyline()[1].x()
+        y_end = feat_exp.geometry().asPolyline()[1].y()
+        # equation of corridor line
+        a_line, b_line = line(y_start, y_end, x_start, x_end)
+        angle = atan(a_line) * 180 / pi
+
+        if angle < 0:
+            angle = angle + 180
+        if y_end - y_start < 0:
+            angle = angle + 180
+
+        featbuff_exp = buff_exp_lines.getFeature(feat_exp.id())
+        # geometry object of line buffer
+        geom_line_buf = featbuff_exp.geometry()
+        a, b, a2, b2, Dx, Dy = bounding_box_at_angle(angle, geom_line_buf)
+        Nx, Ny = strips_projection_centres_number(Dx, Dy, Bx, By,
+            len_across, mult_base, x_percent)
+        Nx = Nx - 2
+
+        nr_photos_in_strip[f"segment_{feat_exp.id()}"] = Nx
+
+    photo = 1
+    strip = 1
+    all_directions = []
+    for direction in range(1, Ny+1):
+        if direction % 2 != 0:
+            last_strip, last_photo, strips_in_direction = forward(strip,
+                photo, nr_photos_in_strip)
+            strip = last_strip
+            photo = last_photo
+        else:
+            last_strip, last_photo, strips_in_direction = backward(strip,
+                photo, nr_photos_in_strip)
+            strip = last_strip
+            photo = last_photo
+        all_directions.append(strips_in_direction)
+
+    ordered_segments = {}
+    for n in range(1, segments+1):
+        segment_list = [d[f'segment_{n}'] for d in all_directions]
+        segment_dict = {}
+        for strip in segment_list:
+            segment_dict.update(strip)
+        ordered_segments[f'segment_{n}'] = segment_dict
+        
+    return ordered_segments
+
+
+def strips_projection_centres_number(Dx, Dy, Bx, By, Ly, m, x):
+    """Return number of strips Ny and projection centres Nx
+    for Area of Interst or one segment of corridor flight."""
     # Dx, Dy - dimensions of bounding box at angle,
     # respectively along and across of the flight direction
     # Bx, By - longitudinal, transverse base between center projections
@@ -371,13 +457,32 @@ def projection_centres(alpha, geometry, crs_vect, a_ll, b_ll, a_l_, b_l_,
         Dy_o = 0
     Ny = ceil(Dy_o / By) + 1
 
+    # number of photos in a strip
+    Nx = ceil(Dx / Bx) + 2 * m + 1
+
+    return Nx, Ny
+
+
+def projection_centres(alpha, geometry, crs_vect, a_ll, b_ll, a_l_, b_l_,
+                       Dx, Dy, Bx, By, Lx, Ly, x, m, H, strip_nr, photo_nr):
+    """Create QgsVectorLayer of projection centers with attribute table
+    and QgsVectorLayer range of photos at average terrain height."""
+    # Dx, Dy - dimensions of bounding box at angle,
+    # respectively along and across of the flight direction
+    # Bx, By - longitudinal, transverse base between center projections
+
+    Nx, Ny = strips_projection_centres_number(Dx, Dy, Bx, By, Ly, m, x)
+    # optimization number of strips
+    Dy_o = Dy - 2 * (0.5 - x / 100) * Ly
+    # exceptions if dimension Dy is too thin (e.g. corridors)
+    if Dy_o < 0:
+        Dy_o = 0
+
     if Ny != 1:
         By_o = Dy_o / (Ny - 1)
     else:
         By_o = 0
 
-    # number of photos in a strip
-    Nx = ceil(Dx / Bx) + 2 * m + 1
     # line moved away from line of bounding box, parallel to flight direction
     # converting the coefficients of both lines y = ax + b
     # to the form Ax + By + C = 0

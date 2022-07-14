@@ -23,6 +23,7 @@
 """
 import os
 import json
+import traceback
 from math import sqrt, ceil, fabs, pi, atan2, atan
 
 import processing
@@ -43,8 +44,10 @@ from qgis.core import (
 from .camera import Camera
 from .worker import Worker
 from .functions import (
+    corridor_flight_numbering,
     bounding_box_at_angle,
-    projection_centres, line,
+    projection_centres,
+    line,
     transf_coord,
     minmaxheight,
     save_error
@@ -567,7 +570,7 @@ class FlightPlannerDialog(QtWidgets.QDialog, FORM_CLASS):
                     # buffer for each exp_lines
                     buffered_exp_lines = processing.run("native:buffer",
                                                         {'INPUT': exp_lines, 'DISTANCE': self.doubleSpinBoxBuffer.value(),
-                                                        'SEGMENTS': 5, 'END_CAP_STYLE': 0, 'JOIN_STYLE': 0,
+                                                        'SEGMENTS': 5, 'END_CAP_STYLE': 1, 'JOIN_STYLE': 1,
                                                         'MITER_LIMIT': 2, 'DISSOLVE': False,
                                                         'OUTPUT': 'TEMPORARY_OUTPUT'})
                     buff_exp_lines = buffered_exp_lines['OUTPUT']
@@ -576,6 +579,11 @@ class FlightPlannerDialog(QtWidgets.QDialog, FORM_CLASS):
                     photo_lay_list = []
                     line_buf_list = []
 
+                    segments = len([segment for segment in exp_lines.getFeatures()])
+                    ordered_segments = corridor_flight_numbering(exp_lines.getFeatures(),
+                        buff_exp_lines, Bx, By, len_across, mult_base, x_percent, segments)
+
+                    segment_nr = 1
                     # building projection centres and photos layer for each line
                     for feat_exp in feats_exp_lines:
                         x_start = feat_exp.geometry().asPolyline()[0].x()
@@ -588,8 +596,10 @@ class FlightPlannerDialog(QtWidgets.QDialog, FORM_CLASS):
 
                         if angle < 0:
                             angle = angle + 180
+                        if y_end - y_start < 0:
+                            angle = angle + 180
 
-                        featbuff_exp = buff_exp_lines.getFeature(feat_exp.id())
+                        featbuff_exp = buff_exp_lines.getFeature(segment_nr)
                         # geometry object of line buffer
                         geom_line_buf = featbuff_exp.geometry()
                         line_buf_list.append(geom_line_buf)
@@ -602,14 +612,25 @@ class FlightPlannerDialog(QtWidgets.QDialog, FORM_CLASS):
                             mult_base, altitude_ASL, strip, photo)
                         # adding helping field for function 'alt. for each strip'
                         pc_lay.startEditing()
+                        photo_lay.startEditing()
                         pc_lay.addAttribute(QgsField("BuffNr", QVariant.Int))
-                        pc_lay.selectAll()
 
-                        for f in range(min(pc_lay.selectedFeatureIds()) - 1, \
-                                    max(pc_lay.selectedFeatureIds()) + 1):
-                            pc_lay.changeAttributeValue(f, 9, feat_exp.id())
+                        segment = ordered_segments[f'segment_{segment_nr}']
+                        feature_id = 1
+                        for strip_nr, photos_nr in segment.items():
+                            for photo_nr in photos_nr:
+                                st_nr = '%(s_nr)04d' % {'s_nr': strip_nr}
+                                ph_nr = '%(p_nr)05d' % {'p_nr': photo_nr}
+                                pc_lay.changeAttributeValue(feature_id, 0, st_nr)
+                                pc_lay.changeAttributeValue(feature_id, 1, ph_nr)
+                                pc_lay.changeAttributeValue(feature_id, 9, segment_nr)
+                                photo_lay.changeAttributeValue(feature_id, 0, st_nr)
+                                photo_lay.changeAttributeValue(feature_id, 1, ph_nr)
+                                feature_id += 1
+                        segment_nr = segment_nr + 1
 
                         pc_lay.commitChanges()
+                        photo_lay.commitChanges()
                         pc_lay_list.append(pc_lay)
                         photo_lay_list.append(photo_lay)
                         strip = s_nr
@@ -627,8 +648,9 @@ class FlightPlannerDialog(QtWidgets.QDialog, FORM_CLASS):
                 s = int(pc_lay.maximumValue(0))
                 theta = fabs(atan2(len_across / 2, len_along / 2))
                 dist = sqrt((len_along / 2) ** 2 + (len_across / 2) ** 2)
-            except:
+            except Exception as e:
                 QMessageBox.about(self, 'Error', 'Flight design failed')
+                print(e, traceback.format_exc())
                 save_error()
             else:
                 if self.comboBoxAltitudeType.currentText() == 'Separate altitude ASL for each strip':
