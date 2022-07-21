@@ -801,8 +801,8 @@ class FlightPlannerDialog(QtWidgets.QDialog, FORM_CLASS):
                                                         'Enter camera name:')
             if pressed_ok:
                 new_camera = Camera(camera_name,
-                                    self.doubleSpinBoxFocalLength.value(),
-                                    self.doubleSpinBoxSensorSize.value(),
+                                    self.doubleSpinBoxFocalLength.value() / 1000,
+                                    self.doubleSpinBoxSensorSize.value() / 1000000,
                                     self.spinBoxPixelsAlongTrack.value(),
                                     self.spinBoxPixelsAcrossTrack.value())
                 new_camera.save()
