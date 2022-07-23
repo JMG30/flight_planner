@@ -91,15 +91,15 @@ class FlightPlannerDialog(QtWidgets.QDialog, FORM_CLASS):
         self.mMapLayerComboBoxAoI.setFilters(QgsMapLayerProxyModel.PolygonLayer)
         self.mMapLayerComboBoxCorridor.setFilters(QgsMapLayerProxyModel.LineLayer)
 
-        self.comboBoxAltitudeType.addItems(["One altitude ASL for entire flight",
-            "Separate altitude ASL for each strip",
-            "Terrain following"])
+        self.comboBoxAltitudeType.addItems(["One Altitude ASL For Entire Flight",
+            "Separate Altitude ASL For Each Strip",
+            "Terrain Following"])
 
         # Set up ComboBox of camera
         self.cameras_file = os.path.join(
             os.path.dirname(os.path.abspath(__file__)), 'cameras.json')
         with open(self.cameras_file, 'r', encoding='utf-8') as file:
-            self.cameras = [Camera(**camera) for camera in json.load(file)]
+            self.cameras = [Camera(**camera) for camera in sorted(json.load(file), key=lambda x : x['name'])]
             self.comboBoxCamera.addItems([camera.name for camera in self.cameras])
         if self.comboBoxCamera.count() > 0:
             self.comboBoxCamera.setItemText(0, 'Select camera or set parameters')
@@ -146,9 +146,9 @@ class FlightPlannerDialog(QtWidgets.QDialog, FORM_CLASS):
         worker.enabled.connect(self.pushButtonRunDesign.setEnabled)
         worker.enabled.connect(self.pushButtonRunControl.setEnabled)
 
-        if self.comboBoxAltitudeType.currentText() == 'Separate altitude ASL for each strip':
+        if self.comboBoxAltitudeType.currentText() == 'Separate Altitude ASL For Each Strip':
             thread.started.connect(worker.run_altitudeStrip)
-        elif self.comboBoxAltitudeType.currentText() == 'Terrain following':
+        elif self.comboBoxAltitudeType.currentText() == 'Terrain Following':
             thread.started.connect(worker.run_followingTerrain)
 
         thread.start()
@@ -230,16 +230,16 @@ class FlightPlannerDialog(QtWidgets.QDialog, FORM_CLASS):
 
     def on_comboBoxAltitudeType_activated(self, text):
         if isinstance(text, str):
-            if text in ['Separate altitude ASL for each strip', 'Terrain following'] \
+            if text in ['Separate Altitude ASL For Each Strip', 'Terrain Following'] \
                 and not self.mMapLayerComboBoxDTM.currentLayer():
                 QMessageBox.about(self, 'DTM needed', 'You must select DTM to use this option')
-                self.comboBoxAltitudeType.setCurrentText("One altitude ASL for entire flight")
+                self.comboBoxAltitudeType.setCurrentText("One Altitude ASL For Each Strip")
             elif text == 'Terrain following' and self.mMapLayerComboBoxDTM.currentLayer():
                 self.doubleSpinBoxSlopeThreshold.setEnabled(True)
             else:
                 self.doubleSpinBoxSlopeThreshold.setEnabled(False)
 
-            if self.comboBoxAltitudeType.currentText() != 'One altitude ASL for entire flight':
+            if self.comboBoxAltitudeType.currentText() != 'One Altitude ASL For Entire Flight':
                 self.checkBoxIncreaseOverlap.setChecked(False)
                 self.checkBoxIncreaseOverlap.setEnabled(False)
                 self.pushButtonGetHeights.setEnabled(False)
@@ -251,7 +251,7 @@ class FlightPlannerDialog(QtWidgets.QDialog, FORM_CLASS):
                 self.doubleSpinBoxMaxHeight.setEnabled(True)
                 self.doubleSpinBoxMinHeight.setEnabled(True)
 
-            if self.comboBoxAltitudeType.currentText() == 'Terrain following':
+            if self.comboBoxAltitudeType.currentText() == 'Terrain Following':
               self.radioButtonAltAGL.setEnabled(True)
             else:
                self.radioButtonAltAGL.setEnabled(False)
@@ -507,7 +507,7 @@ class FlightPlannerDialog(QtWidgets.QDialog, FORM_CLASS):
     def on_pushButtonRunDesign_clicked(self):
         """Push Button to make a flight plan."""
         attributes_exist = True
-        if self.comboBoxAltitudeType.currentText() in ['Separate altitude ASL for each strip', 'Terrain following']:
+        if self.comboBoxAltitudeType.currentText() in ['Separate Altitude ASL For Each Strip', 'Terrain Following']:
             if not hasattr(self, 'DTM'):
                 QMessageBox.about(self, 'DTM needed', 'You have to load DTM layer')
                 attributes_exist = False
@@ -653,7 +653,7 @@ class FlightPlannerDialog(QtWidgets.QDialog, FORM_CLASS):
                 print(e, traceback.format_exc())
                 save_error()
             else:
-                if self.comboBoxAltitudeType.currentText() == 'Separate altitude ASL for each strip':
+                if self.comboBoxAltitudeType.currentText() == 'Separate Altitude ASL For Each Strip':
                     if self.tabCorridor:
                         self.startWorker_updateAltitude(pointLayer=pc_lay,
                                                         theta=theta, 
@@ -681,7 +681,7 @@ class FlightPlannerDialog(QtWidgets.QDialog, FORM_CLASS):
                     self.pushButtonRunDesign.setEnabled(False)
                     self.pushButtonRunControl.setEnabled(False)
 
-                elif self.comboBoxAltitudeType.currentText() == 'Terrain following':
+                elif self.comboBoxAltitudeType.currentText() == 'Terrain Following':
                     self.startWorker_updateAltitude(pointLayer=pc_lay,
                                                     theta=theta,
                                                     distance=dist,
@@ -801,8 +801,8 @@ class FlightPlannerDialog(QtWidgets.QDialog, FORM_CLASS):
                                                         'Enter camera name:')
             if pressed_ok:
                 new_camera = Camera(camera_name,
-                                    self.doubleSpinBoxFocalLength.value(),
-                                    self.doubleSpinBoxSensorSize.value(),
+                                    self.doubleSpinBoxFocalLength.value() / 1000,
+                                    self.doubleSpinBoxSensorSize.value() / 1000000,
                                     self.spinBoxPixelsAlongTrack.value(),
                                     self.spinBoxPixelsAcrossTrack.value())
                 new_camera.save()
