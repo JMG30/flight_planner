@@ -233,8 +233,8 @@ class FlightPlannerDialog(QtWidgets.QDialog, FORM_CLASS):
             if text in ['Separate Altitude ASL For Each Strip', 'Terrain Following'] \
                 and not self.mMapLayerComboBoxDTM.currentLayer():
                 QMessageBox.about(self, 'DTM needed', 'You must select DTM to use this option')
-                self.comboBoxAltitudeType.setCurrentText("One Altitude ASL For Each Strip")
-            elif text == 'Terrain following' and self.mMapLayerComboBoxDTM.currentLayer():
+                self.comboBoxAltitudeType.setCurrentText("One Altitude ASL For Entire Flight")
+            elif text == 'Terrain Following' and self.mMapLayerComboBoxDTM.currentLayer():
                 self.doubleSpinBoxSlopeThreshold.setEnabled(True)
             else:
                 self.doubleSpinBoxSlopeThreshold.setEnabled(False)
