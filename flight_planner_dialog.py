@@ -235,9 +235,9 @@ class FlightPlannerDialog(QtWidgets.QDialog, FORM_CLASS):
                 QMessageBox.about(self, 'DTM needed', 'You must select DTM to use this option')
                 self.comboBoxAltitudeType.setCurrentText("One Altitude ASL For Entire Flight")
             elif text == 'Terrain Following' and self.mMapLayerComboBoxDTM.currentLayer():
-                self.doubleSpinBoxSlopeThreshold.setEnabled(True)
+                self.doubleSpinBoxTolerance.setEnabled(True)
             else:
-                self.doubleSpinBoxSlopeThreshold.setEnabled(False)
+                self.doubleSpinBoxTolerance.setEnabled(False)
 
             if self.comboBoxAltitudeType.currentText() != 'One Altitude ASL For Entire Flight':
                 self.checkBoxIncreaseOverlap.setChecked(False)
