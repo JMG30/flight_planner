@@ -29,6 +29,7 @@ from qgis.core import (
 )
 
 from .functions import (
+    create_waypoints,
     ground_edge_points,
     image_edge_points,
     crs2pixel,
@@ -74,7 +75,6 @@ class Worker(QObject):
         self.dist = data.get('distance')
         self.altitude_AGL = data.get('altitude_AGL')
         self.altitude_ASL = data.get('altitude_ASL')
-        self.s = data.get('strips')
         self.tab_widg_cor = data.get('tabWidg')
         self.g_line_list = data.get('LineRangeList')
         self.geom_aoi = data.get('Range')
@@ -414,15 +414,16 @@ class Worker(QObject):
     def run_altitudeStrip(self):
         result = []
         try:
+            strips_count = int(self.layer.maximumValue(0))
             progress_c = 0
-            step = self.s // 1000
+            step = strips_count // 1000
             feat_strip = QgsFeature()
 
             if self.crs_rst != self.crs_vct:
                 transf_vct_rst = Transformer.from_crs(self.crs_vct,
                                                       self.crs_rst,
                                                       always_xy=True)
-            for t in range(1, self.s + 1):
+            for t in range(1, strips_count + 1):
 
                 if self.killed is True:
                     # kill request received, exit loop early
@@ -499,7 +500,9 @@ class Worker(QObject):
                 # increment progress
                 progress_c += 1
                 if step == 0 or progress_c % step == 0:
-                    self.progress.emit(progress_c / self.s * 100)
+                    self.progress.emit(progress_c / strips_count * 100)
+
+            waypoints_layer = create_waypoints(self.layer, self.crs_vct)
             if self.killed is False:
                 self.progress.emit(100)
                 # deleting redundant fields
@@ -523,6 +526,7 @@ class Worker(QObject):
                 self.layer_pol.setName('photos')
                 self.layer.setName('projection centres')
                 result.append(self.layer)
+                result.append(waypoints_layer)
                 result.append(self.layer_pol)
         except Exception as e:
             # forward the exception upstream

@@ -90,6 +90,53 @@ def clip_raster(ds, xyf, R, Xs, Ys, Zs, Z_min, trans_v_r, crs_rst, crs_vct):
     return clipped_DTM, updated_geotransform
 
 
+def create_waypoints(projection_centres, crs_vect):
+    """Create points where altitude or direction of flight change."""
+
+    waypoints_layer = QgsVectorLayer("Point?crs=" + str(crs_vect),
+                              "waypoints", "memory")
+    pr = waypoints_layer.dataProvider()
+    pr.addAttributes([QgsField("Waypoint Number", QVariant.Int),
+                    QgsField("X [m]", QVariant.Double),
+                    QgsField("Y [m]", QVariant.Double),
+                    QgsField("Alt. ASL [m]", QVariant.Double),
+                    QgsField("Alt. AGL [m]", QVariant.Double)])
+    waypoints_layer.updateFields()
+
+    strips_nr = int(projection_centres.maximumValue(0))
+    feats = projection_centres.getFeatures()
+    featList = [feat.attributes()[:6] + [feat.geometry()] for feat in feats]
+    featList.sort(key=lambda x: x[1])
+
+    waypoint_nr = 1
+    for strip_nr in range(1, strips_nr+1):
+        strip = [f for f in featList if int(f[0]) == strip_nr]
+        start_waypoint = strip[0]
+        end_waypoint = strip[-1]
+
+        x_start = start_waypoint[-1].asPoint().x()
+        y_start = start_waypoint[-1].asPoint().y()
+        x_end = end_waypoint[-1].asPoint().x()
+        y_end = end_waypoint[-1].asPoint().y()
+
+        feat_pnt = QgsFeature()
+        pnt_start = QgsPointXY(x_start, y_start)
+        feat_pnt.setGeometry(QgsGeometry.fromPointXY(pnt_start))
+        feat_pnt.setAttributes([waypoint_nr] + start_waypoint[2:6])
+        pr.addFeature(feat_pnt)
+        waypoint_nr += 1
+
+        feat_pnt = QgsFeature()
+        pnt_end = QgsPointXY(x_end, y_end)
+        feat_pnt.setGeometry(QgsGeometry.fromPointXY(pnt_end))
+        feat_pnt.setAttributes([waypoint_nr] + end_waypoint[2:6])
+        pr.addFeature(feat_pnt)
+        waypoint_nr += 1
+
+        waypoints_layer.updateExtents()
+    return waypoints_layer
+
+
 def points_pixel_centroids(geotransform, shape):
     """Return pixel centroids for the raster."""
 

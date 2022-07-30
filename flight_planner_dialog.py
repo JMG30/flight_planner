@@ -45,6 +45,7 @@ from .camera import Camera
 from .worker import Worker
 from .functions import (
     corridor_flight_numbering,
+    create_waypoints,
     bounding_box_at_angle,
     projection_centres,
     line,
@@ -645,7 +646,6 @@ class FlightPlannerDialog(QtWidgets.QDialog, FORM_CLASS):
                                                     {'LAYERS': photo_lay_list, 'CRS': None,
                                                     'OUTPUT': 'TEMPORARY_OUTPUT'})
                     photo_lay = merged_poly_lay['OUTPUT']
-                s = int(pc_lay.maximumValue(0))
                 theta = fabs(atan2(len_across / 2, len_along / 2))
                 dist = sqrt((len_along / 2) ** 2 + (len_across / 2) ** 2)
             except Exception as e:
@@ -663,7 +663,6 @@ class FlightPlannerDialog(QtWidgets.QDialog, FORM_CLASS):
                                                         DTM=self.DTM, 
                                                         altitude_AGL=altitude_AGL,
                                                         polygonLayer=photo_lay,
-                                                        strips=s,
                                                         tabWidg=self.tabCorridor,
                                                         LineRangeList=line_buf_list)
                     else:
@@ -675,7 +674,6 @@ class FlightPlannerDialog(QtWidgets.QDialog, FORM_CLASS):
                                                         DTM=self.DTM,
                                                         altitude_AGL=altitude_AGL,
                                                         polygonLayer=photo_lay,
-                                                        strips=s,
                                                         tabWidg=self.tabCorridor,
                                                         Range=self.geom_AoI)
                     self.pushButtonRunDesign.setEnabled(False)
@@ -715,6 +713,7 @@ class FlightPlannerDialog(QtWidgets.QDialog, FORM_CLASS):
                             pc_lay.changeAttributeValue(f.id(), 5, round(altitude_AGL, 2))
                             pc_lay.commitChanges()
 
+                    waypoints_layer = create_waypoints(pc_lay, self.crs_vct)
                     # delete redundant fields
                     pc_lay.startEditing()
                     pc_lay.deleteAttributes([9, 10, 11])
@@ -736,6 +735,7 @@ class FlightPlannerDialog(QtWidgets.QDialog, FORM_CLASS):
 
                     # add layers to canvas
                     QgsProject.instance().addMapLayer(photo_lay)
+                    QgsProject.instance().addMapLayer(waypoints_layer)
                     QgsProject.instance().addMapLayer(pc_lay)
 
     @pyqtSlot()
