@@ -29,6 +29,7 @@ from qgis.core import (
 )
 
 from .functions import (
+    change_layer_style,
     create_waypoints,
     ground_edge_points,
     image_edge_points,
@@ -333,13 +334,9 @@ class Worker(QObject):
                     result.append(gsd_layer)
             # changing 'footprint' layer style
             if self.footprint_bool:
-                renderer = footprint_lay.renderer()
-                symbol = renderer.symbol()
                 prop = {'color': '255,0,0,30', 'color_border': '#000000',
                         'width_border': '0.2'}
-                my_symbol = symbol.createSimple(prop)
-                renderer.setSymbol(my_symbol)
-                footprint_lay.triggerRepaint()
+                change_layer_style(footprint_lay, prop)
                 result.append(footprint_lay)
             if self.killed is False:
                 self.progress.emit(100)
@@ -393,13 +390,10 @@ class Worker(QObject):
                 self.layer_pol.deleteAttributes([2, 3])
                 self.layer_pol.commitChanges()
                 # changing layer style
-                renderer = self.layer_pol.renderer()
-                symbol = renderer.symbol()
                 prop = {'color': '200,200,200,30', 'color_border': '#000000',
                         'width_border': '0.2'}
-                my_symbol = symbol.createSimple(prop)
-                renderer.setSymbol(my_symbol)
-                self.layer_pol.triggerRepaint()
+                change_layer_style(self.layer_pol, prop)
+                change_layer_style(self.layer, {'size': '1.0'})
                 self.layer_pol.setName('photos')
                 self.layer.setName('projection centres')
                 result.append(self.layer)
@@ -515,13 +509,10 @@ class Worker(QObject):
                     self.layer_pol.commitChanges()
 
                 # changing layer style
-                renderer = self.layer_pol.renderer()
-                symbol = renderer.symbol()
                 prop = {'color': '200,200,200,30', 'color_border': '#000000',
                         'width_border': '0.2'}
-                my_symbol = symbol.createSimple(prop)
-                renderer.setSymbol(my_symbol)
-                self.layer_pol.triggerRepaint()
+                change_layer_style(self.layer_pol, prop)
+                change_layer_style(self.layer, {'size': '1.0'})
                 # changing layers name
                 self.layer_pol.setName('photos')
                 self.layer.setName('projection centres')

@@ -44,6 +44,7 @@ from qgis.core import (
 from .camera import Camera
 from .worker import Worker
 from .functions import (
+    change_layer_style,
     corridor_flight_numbering,
     create_waypoints,
     bounding_box_at_angle,
@@ -723,13 +724,10 @@ class FlightPlannerDialog(QtWidgets.QDialog, FORM_CLASS):
                     photo_lay.commitChanges()
 
                     # change layers style
-                    renderer = photo_lay.renderer()
-                    symbol = renderer.symbol()
                     prop = {'color': '200,200,200,30', 'color_border': '#000000',
                             'width_border': '0.2'}
-                    my_symbol = symbol.createSimple(prop)
-                    renderer.setSymbol(my_symbol)
-                    photo_lay.triggerRepaint()
+                    change_layer_style(photo_lay, prop)
+                    change_layer_style(pc_lay, {'size': '1.0'})
                     photo_lay.setName('photos')
                     pc_lay.setName('projection centres')
 

@@ -34,6 +34,14 @@ from qgis.core import (
 )
 
 
+def change_layer_style(layer, properties):
+    """Change layer style according to the properties."""
+    renderer = layer.renderer()
+    symbol = renderer.symbol()
+    renderer.setSymbol(symbol.createSimple(properties))
+    layer.triggerRepaint()
+
+
 def clip_raster(ds, xyf, R, Xs, Ys, Zs, Z_min, trans_v_r, crs_rst, crs_vct):
     """Return DTM clipped by bounding box of photo. Range of bounding box
      is derived from photo's Exterior Orientation Parameters, camera parameters
