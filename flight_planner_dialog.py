@@ -686,9 +686,10 @@ class FlightPlannerDialog(QtWidgets.QDialog, FORM_CLASS):
                                                     distance=dist,
                                                     crsVectorLayer=self.crs_vct,
                                                     crsRasterLayer=self.crs_rst, 
-                                                    DTM=self.DTM,
+                                                    raster=self.raster,
                                                     altitude_AGL=altitude_AGL,
                                                     polygonLayer=photo_lay,
+                                                    tolerance = self.doubleSpinBoxTolerance.value()
                                                     )
                     self.pushButtonRunDesign.setEnabled(False)
                     self.pushButtonRunControl.setEnabled(False)

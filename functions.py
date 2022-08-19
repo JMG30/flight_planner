@@ -145,6 +145,49 @@ def create_waypoints(projection_centres, crs_vect):
     return waypoints_layer
 
 
+def z_at_3d_line(pnt, start_pnt, end_pnt):
+    """Return "z" coordinate for point with known x,y
+    lying on line in space defined by start and end points.
+    """
+    x1, y1, z1 = start_pnt
+    x2, y2, z2 = end_pnt
+    x, y = pnt[:2]
+
+    if x1 != x2:
+        t = (x - x1) / (x2 - x1)
+    else:
+        t = (y - y1) / (y2 - y1)
+    z = t * (z2 - z1) + z1
+    return z
+
+
+def simplify_profile(vertices, epsilon):
+    """Reduces the number of vertices in the line, keeping its main shape.
+    It is based on the Douglas-Peucker simplification algorithm but
+    with the vertical distance instead of perpendicular.
+    """
+    hmax = 0.0
+    index = 0
+    for i in range(1, len(vertices) - 1):
+        z = z_at_3d_line(vertices[i], vertices[0], vertices[-1])
+        h = abs(z - vertices[i][2])
+        if h > hmax:
+            index = i
+            hmax = h
+
+    if hmax >= epsilon:
+        results = simplify_profile(vertices[:index+1], epsilon)[:-1]\
+                  + simplify_profile(vertices[index:], epsilon)
+    else:
+        results = [vertices[0], vertices[-1]]
+
+    return results
+
+
+def distance2d(a, b):
+    return sqrt((a[0] - b[0]) ** 2 + (a[1] - b[1]) ** 2)
+
+
 def points_pixel_centroids(geotransform, shape):
     """Return pixel centroids for the raster."""
 
