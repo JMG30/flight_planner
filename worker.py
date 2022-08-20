@@ -35,6 +35,7 @@ from qgis.core import (
 from .functions import (
     change_layer_style,
     clip_raster,
+    create_flight_line,
     create_waypoints,
     crs2pixel,
     distance2d,
@@ -499,6 +500,7 @@ class Worker(QObject):
                     self.progress.emit(progress_c / float(strips_nr) * 100)
             if self.killed is False:
                 self.progress.emit(100)
+                flight_line = create_flight_line(waypoints_layer, self.crs_vct)
                 # deleting reduntant fields
                 self.layer.startEditing()
                 self.layer.deleteAttributes([9, 10, 11])
@@ -514,6 +516,7 @@ class Worker(QObject):
                 self.layer_pol.setName('photos')
                 self.layer.setName('projection centres')
                 result.append(self.layer)
+                result.append(flight_line)
                 result.append(waypoints_layer)
                 result.append(self.layer_pol)
         except Exception as e:
@@ -617,6 +620,7 @@ class Worker(QObject):
             waypoints_layer = create_waypoints(self.layer, self.crs_vct)
             if self.killed is False:
                 self.progress.emit(100)
+                flight_line = create_flight_line(waypoints_layer, self.crs_vct)
                 # deleting redundant fields
                 if self.tab_widg_cor:
                     self.layer.startEditing()
@@ -635,6 +639,7 @@ class Worker(QObject):
                 self.layer_pol.setName('photos')
                 self.layer.setName('projection centres')
                 result.append(self.layer)
+                result.append(flight_line)
                 result.append(waypoints_layer)
                 result.append(self.layer_pol)
         except Exception as e:

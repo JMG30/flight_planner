@@ -47,6 +47,7 @@ from .functions import (
     change_layer_style,
     corridor_flight_numbering,
     create_waypoints,
+    create_flight_line,
     bounding_box_at_angle,
     projection_centres,
     line,
@@ -716,6 +717,7 @@ class FlightPlannerDialog(QtWidgets.QDialog, FORM_CLASS):
                             pc_lay.commitChanges()
 
                     waypoints_layer = create_waypoints(pc_lay, self.crs_vct)
+                    flight_line = create_flight_line(waypoints_layer, self.crs_vct)
                     # delete redundant fields
                     pc_lay.startEditing()
                     pc_lay.deleteAttributes([9, 10, 11])
@@ -734,6 +736,7 @@ class FlightPlannerDialog(QtWidgets.QDialog, FORM_CLASS):
 
                     # add layers to canvas
                     QgsProject.instance().addMapLayer(photo_lay)
+                    QgsProject.instance().addMapLayer(flight_line)
                     QgsProject.instance().addMapLayer(waypoints_layer)
                     QgsProject.instance().addMapLayer(pc_lay)
 

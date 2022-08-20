@@ -30,6 +30,7 @@ from qgis.core import (
     QgsField,
     QgsGeometry,
     QgsPointXY,
+    QgsPoint,
     QgsVectorLayer
 )
 
@@ -96,6 +97,26 @@ def clip_raster(ds, xyf, R, Xs, Ys, Zs, Z_min, trans_v_r, crs_rst, crs_vct):
     updated_geotransform[3] = y0
 
     return clipped_DTM, updated_geotransform
+
+
+def create_flight_line(waypoints_lyr, crs_vect):
+    """Create flight line passing through all the waypoints."""
+    flight_line = QgsVectorLayer("LineStringZ?crs=" + str(crs_vect),
+                                        "flight_line", "memory")
+    pr = flight_line.dataProvider()
+    waypoints = []
+    for w in waypoints_lyr.getFeatures():
+        x = w.geometry().asPoint().x()
+        y = w.geometry().asPoint().y()
+        z = w.attribute('Alt. ASL [m]')
+        pnt = QgsPoint(x, y, z)
+        waypoints.append(pnt)
+
+    feat = QgsFeature()
+    feat.setGeometry(QgsGeometry.fromPolyline(waypoints))
+    pr.addFeature(feat)
+    flight_line.updateExtents()
+    return flight_line
 
 
 def create_waypoints(projection_centres, crs_vect):
