@@ -718,6 +718,10 @@ class FlightPlannerDialog(QtWidgets.QDialog, FORM_CLASS):
 
                     waypoints_layer = create_waypoints(pc_lay, self.crs_vct)
                     flight_line = create_flight_line(waypoints_layer, self.crs_vct)
+                    style_path = os.path.join(
+                        os.path.dirname(os.path.abspath(__file__)), 'flight_line_style.qml')
+                    flight_line.loadNamedStyle(style_path)
+                    
                     # delete redundant fields
                     pc_lay.startEditing()
                     pc_lay.deleteAttributes([9, 10, 11])

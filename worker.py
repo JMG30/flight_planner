@@ -501,6 +501,9 @@ class Worker(QObject):
             if self.killed is False:
                 self.progress.emit(100)
                 flight_line = create_flight_line(waypoints_layer, self.crs_vct)
+                style_path = os.path.join(
+                        os.path.dirname(os.path.abspath(__file__)), 'flight_line_style.qml')
+                flight_line.loadNamedStyle(style_path)
                 # deleting reduntant fields
                 self.layer.startEditing()
                 self.layer.deleteAttributes([9, 10, 11])
@@ -621,6 +624,9 @@ class Worker(QObject):
             if self.killed is False:
                 self.progress.emit(100)
                 flight_line = create_flight_line(waypoints_layer, self.crs_vct)
+                style_path = os.path.join(
+                        os.path.dirname(os.path.abspath(__file__)), 'flight_line_style.qml')
+                flight_line.loadNamedStyle(style_path)
                 # deleting redundant fields
                 if self.tab_widg_cor:
                     self.layer.startEditing()
