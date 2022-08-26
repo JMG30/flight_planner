@@ -555,31 +555,38 @@ class Worker(QObject):
                 for f in feats:
                     if int(f.attribute('Photo Number')) > nrP_max:
                         nrP_max = int(f.attribute('Photo Number'))
-                        xg_max = f.geometry().asPoint().x()
-                        yg_max = f.geometry().asPoint().y()
                     if int(f.attribute('Photo Number')) < nrP_min:
                         nrP_min = int(f.attribute('Photo Number'))
-                        xg_min = f.geometry().asPoint().x()
-                        yg_min = f.geometry().asPoint().y()
-                    kappa = float(f.attribute('Kappa [deg]')) * pi / 180
                     if self.tab_widg_cor:
                         BuffNr = int(f.attribute('BuffNr'))
 
                 # range of the strip
-                # ZLY ZASIEG!!!!!! (UCINA NIEWIELKA CZESC STRIP PRZEZ ZLE WIERZCHOLKI)
-                xmin1 = xg_min + cos(kappa + self.theta - pi) * self.dist
-                ymin1 = yg_min + sin(kappa + self.theta - pi) * self.dist
-                xmin2 = xg_min + cos(kappa - self.theta + pi) * self.dist
-                ymin2 = yg_min + sin(kappa - self.theta + pi) * self.dist
-                xmax1 = xg_max + cos(kappa + self.theta) * self.dist
-                ymax1 = yg_max + sin(kappa + self.theta) * self.dist
-                xmax2 = xg_max + cos(kappa - self.theta) * self.dist
-                ymax2 = yg_max + sin(kappa - self.theta) * self.dist
-                one_strip = [QgsPointXY(xmin1, ymin1),
-                             QgsPointXY(xmin2, ymin2),
-                             QgsPointXY(xmax1, ymax1),
-                             QgsPointXY(xmax2, ymax2)]
+                photos_list = [f.attributes()[:2] + [f.id(), f.geometry()] for f in self.layer_pol.getFeatures()]
+                photos_list.sort(key=lambda x: x[1])
+                strip_photos = [f for f in photos_list if int(f[0]) == t]
+
+                first_photo = [p for p in strip_photos[0][-1].asPolygon()[0]]
+                last_photo = [p for p in strip_photos[-1][-1].asPolygon()[0]]
+                points = first_photo + last_photo
+
+                x_pnt = np.array([pnt.x() for pnt in points]).reshape(-1, 1)
+                y_pnt = np.array([pnt.y() for pnt in points]).reshape(-1, 1)
+                pnts = np.hstack((x_pnt, y_pnt))
+
+                pnt1 = pnts[np.argmin(pnts[:, 0])]
+                pnt2 = pnts[np.argmin(pnts[:, 1])]
+                pnt3 = pnts[np.argmax(pnts[:, 0])]
+                pnt4 = pnts[np.argmax(pnts[:, 1])]
+
+                one_strip = [QgsPointXY(pnt1[0], pnt1[1]),
+                             QgsPointXY(pnt2[0], pnt2[1]),
+                             QgsPointXY(pnt3[0], pnt3[1]),
+                             QgsPointXY(pnt4[0], pnt4[1])]
                 g_strip = QgsGeometry.fromPolygonXY([one_strip])
+                kappa = float(f.attribute('Kappa [deg]'))
+                if kappa in [-90, 0, 90, 180]:
+                    g_strip = QgsGeometry.fromPolygonXY([points])
+                    g_strip = QgsGeometry.fromRect(g_strip.boundingBox())
 
                 # common part of strip and Area of Interest
                 if self.tab_widg_cor:
