@@ -55,7 +55,7 @@ from .functions import (
 class Worker(QObject):
     """Maintain hard work to lighten main thread of plugin."""
 
-    finished = pyqtSignal(object)
+    finished = pyqtSignal(object, basestring)
     error = pyqtSignal(Exception, basestring)
     progress = pyqtSignal(float)
     enabled = pyqtSignal(bool)
@@ -352,7 +352,7 @@ class Worker(QObject):
         except Exception as e:
             self.error.emit(e, traceback.format_exc())
             save_error()
-        self.finished.emit(result)
+        self.finished.emit(result, "quality_control")
         self.enabled.emit(True)
 
 
@@ -526,7 +526,7 @@ class Worker(QObject):
             # forward the exception upstream
             self.error.emit(e, traceback.format_exc())
             save_error()
-        self.finished.emit(result)
+        self.finished.emit(result, "flight_design")
         self.enabled.emit(True)
 
     def run_altitudeStrip(self):
@@ -659,7 +659,7 @@ class Worker(QObject):
             # forward the exception upstream
             self.error.emit(e, traceback.format_exc())
             save_error()
-        self.finished.emit(result)
+        self.finished.emit(result, "flight_design")
         self.enabled.emit(True)
 
     def kill(self):

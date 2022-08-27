@@ -37,13 +37,13 @@ from qgis.core import (
     QgsField,
     QgsFieldProxyModel,
     QgsMapLayerProxyModel,
-    QgsProject,
     QgsPointXY
 )
 
 from .camera import Camera
 from .worker import Worker
 from .functions import (
+    add_layers_to_canvas,
     change_layer_style,
     corridor_flight_numbering,
     create_waypoints,
@@ -116,6 +116,9 @@ class FlightPlannerDialog(QtWidgets.QDialog, FORM_CLASS):
                             pixels_along_track=self.spinBoxPixelsAlongTrack.value(),
                             pixels_across_track=self.spinBoxPixelsAcrossTrack.value())
 
+        self.control_run_counter = 1
+        self.design_run_counter = 1
+
     def startWorker_control(self, **params):
         """Start worker for control module of plugin."""
         # Create a new worker instance
@@ -158,7 +161,7 @@ class FlightPlannerDialog(QtWidgets.QDialog, FORM_CLASS):
         self.thread = thread
         self.worker = worker
 
-    def workerFinished(self, result):
+    def workerFinished(self, result, group_name):
         # clean up the worker and thread
         self.worker.deleteLater()
         self.thread.quit()
@@ -166,7 +169,12 @@ class FlightPlannerDialog(QtWidgets.QDialog, FORM_CLASS):
         self.thread.deleteLater()
         if result is not None:
             # report the result
-            QgsProject.instance().addMapLayers(result)
+            if group_name == 'flight_design':
+                add_layers_to_canvas(result, group_name, self.design_run_counter)
+                self.design_run_counter += 1
+            elif group_name == 'quality_control':
+                add_layers_to_canvas(result, group_name, self.control_run_counter)
+                self.control_run_counter += 1
         else:
             # notify the user that something went wrong
             print('Something went wrong!')
@@ -738,11 +746,9 @@ class FlightPlannerDialog(QtWidgets.QDialog, FORM_CLASS):
                     photo_lay.setName('photos')
                     pc_lay.setName('projection centres')
 
-                    # add layers to canvas
-                    QgsProject.instance().addMapLayer(photo_lay)
-                    QgsProject.instance().addMapLayer(flight_line)
-                    QgsProject.instance().addMapLayer(waypoints_layer)
-                    QgsProject.instance().addMapLayer(pc_lay)
+                    layers = [pc_lay, flight_line, waypoints_layer, photo_lay]
+                    add_layers_to_canvas(layers, "flight_design", self.design_run_counter)
+                    self.design_run_counter += 1
 
     @pyqtSlot()
     def on_pushButtonRunControl_clicked(self):

@@ -31,8 +31,19 @@ from qgis.core import (
     QgsGeometry,
     QgsPointXY,
     QgsPoint,
+    QgsProject,
     QgsVectorLayer
 )
+
+
+def add_layers_to_canvas(layers, group_name, counter=1):
+    """Add grouped layers to the canvas"""
+    root = QgsProject.instance().layerTreeRoot()
+    group = root.insertGroup(0, f"{group_name}_{counter}")
+    QgsProject.instance().addMapLayers(layers, False)
+    for layer in layers:
+        layer.setName(layer.name() + f"_{counter}")
+        group.addLayer(layer)
 
 
 def change_layer_style(layer, properties):
