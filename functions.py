@@ -670,10 +670,6 @@ def projection_centres(alpha, geometry, crs_vect, a_ll, b_ll, a_l_, b_l_,
     prov_photos.addAttributes([QgsField("Strip", QVariant.String),
                                QgsField("Photo Number", QVariant.String)])
     photo_layer.updateFields()
-    if 0 <= alpha <= 180:
-        kappa = alpha
-    else:
-        kappa = alpha - 360
     d = sqrt((Lx / 2) ** 2 + (Ly / 2) ** 2)
     theta = fabs(atan2(Ly / 2, Lx / 2))
 
@@ -693,6 +689,14 @@ def projection_centres(alpha, geometry, crs_vect, a_ll, b_ll, a_l_, b_l_,
                       QgsPointXY(xe3, ye3), QgsPointXY(xe4, ye4)]
         geom_strip = QgsGeometry.fromPolygonXY([strip_pnts])
         common_part = geom_strip.intersection(geometry)
+
+        if k % 2 != 0:
+            if 0 <= alpha <= 180:
+                kappa = alpha + 180
+            else:
+                kappa = alpha - 180
+        else:
+            kappa = alpha
 
         for n in range(-m, Nx - m):
             xi = x0 + n * dx
