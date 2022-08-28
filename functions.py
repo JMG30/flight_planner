@@ -338,7 +338,7 @@ def ground_edge_points(R, Z, threshold, xyf, Xs, Ys, Zs,
             column, row = crs2pixel(geotransform, X_DTM, Y_DTM)
 
         rc_array = np.column_stack((row, column)).T
-        Z = ndimage.map_coordinates(Z_DTM, rc_array, output=np.float)
+        Z = ndimage.map_coordinates(Z_DTM, rc_array, output=float)
 
         # protection against too long iteration
         if counter > 100:
