@@ -394,7 +394,7 @@
           <item row="0" column="0">
            <widget class="QLabel" name="labelMinHeight">
             <property name="text">
-             <string>Terrain's Minimum Height</string>
+             <string>&lt;html&gt;&lt;head/&gt;&lt;body&gt;&lt;p&gt;Terrain Minimum Height&lt;/p&gt;&lt;/body&gt;&lt;/html&gt;</string>
             </property>
            </widget>
           </item>
@@ -427,7 +427,7 @@
           <item row="1" column="0">
            <widget class="QLabel" name="labelMaxHeight">
             <property name="text">
-             <string>Terrain's Maximum Height</string>
+             <string>Terrain Maximum Height</string>
             </property>
            </widget>
           </item>

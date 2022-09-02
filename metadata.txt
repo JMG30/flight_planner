@@ -1,18 +1,23 @@
 [general]
 name=Flight Planner
 qgisMinimumVersion=3.16
-description=Flight Planner allows you to make a plan of photogrammetric flight. Plugin is equipped in simple tools allowing to asses the flight project (or already done flight).
-version=0.5.4
+description=Flight Planner allows you to design photogrammetric flight. Plugin is also equipped in simple tools allowing to asses the flight project (or already done flight).
+version=0.6.0
 author=Jakub Gruca
 email=jakubmgruca@gmail.com
 
-about=Flight Planner allows you to make a plan of photogrammetric flight (block or corridor type). You can also evaluation the project or already done flight, by providing 'projection centres of photos' layer with Exterior Orientation parameters in attribute table. In the results you can get: real photos coverage; logical sum of overlapping photos or raster showing GSD. The evaluation tools works fine also for oblique images. Using DTM in evaluation segment is required, in planning is optional, but allows to choose from three methods of counting the flight height.
-
+about=Flight Planner allows you to make a plan of photogrammetric flight (block or corridor type) and get 4 layers: projection centres layer, waypoints layer, photo range layer and flight line layer. You can also evaluate the project (or already done flight), by providing 'projection centres' layer with Exterior Orientation parameters in attribute table. In the results you can get: real photos coverage (footprint); number of overlapping images or raster showing GSD.
 tracker=https://github.com/JMG30/flight_planner/issues
 repository=https://github.com/JMG30/flight_planner
 
 hasProcessingProvider=no
-changelog=0.5.4
+changelog=0.6.0
+	- new layout
+	- added Altitude Above Ground level AGL
+	- added waypoints layer and flight line layer
+	- added tolerance for Terrain Following mode
+
+	0.5.4
 	- order of numbering photos in stripes has been changed ("zig-zag")
 	- faster working
 	
