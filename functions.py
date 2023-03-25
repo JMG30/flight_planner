@@ -32,7 +32,8 @@ from qgis.core import (
     QgsPointXY,
     QgsPoint,
     QgsProject,
-    QgsVectorLayer
+    QgsVectorLayer,
+    Qgis
 )
 
 
@@ -438,7 +439,7 @@ def bounding_box_at_angle(alpha, geom):
         vrtx_dist_l_ = []
         # compute distances from parallel and perpendicular lines
         # to the flight direction to every vertex of geometry
-        for vertex in range(len(geom.convertToType(1).asPolyline())):
+        for vertex in range(len(geom.convertToType(Qgis.GeometryType(1)).asPolyline())):
             vX = geom.vertexAt(vertex).x()
             vY = geom.vertexAt(vertex).y()
             d_ll = (A_ll * vX + B_ll * vY + C_ll) / sqrt(A_ll ** 2 + B_ll ** 2)
