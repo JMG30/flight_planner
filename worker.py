@@ -57,7 +57,7 @@ class Worker(QObject):
 
     finished = pyqtSignal(object, basestring)
     error = pyqtSignal(Exception, basestring)
-    progress = pyqtSignal(float)
+    progress = pyqtSignal(int)
     enabled = pyqtSignal(bool)
 
     def __init__(self, **data):
@@ -241,7 +241,7 @@ class Worker(QObject):
 
                 progress_c += 1
                 if step == 0 or progress_c % step == 0:
-                    self.progress.emit(progress_c / float(feat_count) * 100)
+                    self.progress.emit(int(progress_c / float(feat_count) * 100))
 
             if self.overlap_bool or self.gsd_bool:
                 # range of output raster of 'overlap' and 'gsd' maps
@@ -270,7 +270,7 @@ class Worker(QObject):
 
                     progress_c += 1
                     if step == 0 or progress_c % step == 0:
-                        self.progress.emit(progress_c / float(ds_count) * 100)
+                        self.progress.emit(int(progress_c / float(ds_count) * 100))
                 # saving outputs in temporary folder
                 tmp_overlay = os.path.join(QgsProcessingUtils.tempFolder(), 'overlay.tif')
                 temp_gsd = os.path.join(QgsProcessingUtils.tempFolder(), 'gsd.tif')
@@ -497,7 +497,7 @@ class Worker(QObject):
                 # increment progress
                 progress_c += 1
                 if step == 0 or progress_c % step == 0:
-                    self.progress.emit(progress_c / float(strips_nr) * 100)
+                    self.progress.emit(int(progress_c / float(strips_nr) * 100))
             if self.killed is False:
                 self.progress.emit(100)
                 flight_line = create_flight_line(waypoints_layer, self.crs_vct)
@@ -625,7 +625,7 @@ class Worker(QObject):
                 # increment progress
                 progress_c += 1
                 if step == 0 or progress_c % step == 0:
-                    self.progress.emit(progress_c / strips_count * 100)
+                    self.progress.emit(int(progress_c / strips_count * 100))
 
             waypoints_layer = create_waypoints(self.layer, self.crs_vct)
             if self.killed is False:
