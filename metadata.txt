@@ -1,12 +1,12 @@
 [general]
 name=Flight Planner
 qgisMinimumVersion=3.40
-description=Flight Planner allows you to design photogrammetric flight. Plugin is also equipped in simple tools allowing to asses the flight project (or already done flight).
+description=Deprecated: as of 2025 Flight Planner has been replaced by Flight Planner - Refactored (https://github.com/UAV-GeoLAB/flight_planner) maintained by members of Warsaw University of Technology.
 version=0.6.2
 author=Jakub Gruca
 email=jakubmgruca@gmail.com
 
-about=Flight Planner allows you to make a plan of photogrammetric flight (block or corridor type) and get 4 layers: projection centres layer, waypoints layer, photo range layer and flight line layer. You can also evaluate the project (or already done flight), by providing 'projection centres' layer with Exterior Orientation parameters in attribute table. In the results you can get: real photos coverage (footprint); number of overlapping images or raster showing GSD.
+about=Deprecated: as of 2025 Flight Planner has been replaced by Flight Planner - Refactored (https://github.com/UAV-GeoLAB/flight_planner) maintained by members of Warsaw University of Technology.
 tracker=https://github.com/JMG30/flight_planner/issues
 repository=https://github.com/JMG30/flight_planner
 
@@ -43,7 +43,7 @@ homepage=https://github.com/JMG30/flight_planner
 category=Plugins
 icon=icon.png
 experimental=False
-deprecated=False
+deprecated=True
 
 # plugin_dependencies=
 
