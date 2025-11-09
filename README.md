@@ -1,3 +1,5 @@
+As of 2025 Flight Planner has been replaced by Flight Planner - Refactored (https://github.com/UAV-GeoLAB/flight_planner) maintained by members of Warsaw University of Technology.
+
 # Flight Planner
 QGIS plugin for planning photogrammetric flights.
 
